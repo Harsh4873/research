@@ -1,0 +1,122 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Test frontend
+        run: npm test
+
+      - name: Check frontend types
+        run: npm run typecheck
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Test backend
+        working-directory: backend
+        run: npm test
+
+      - name: Check backend types
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Require production API URL
+        env:
+          VITE_RESEARCH_API_URL: ${{ vars.RESEARCH_API_URL }}
+        run: |
+          test -n "$VITE_RESEARCH_API_URL"
+          node -e "new URL(process.env.VITE_RESEARCH_API_URL)"
+
+      - name: Build frontend
+        env:
+          VITE_RESEARCH_API_URL: ${{ vars.RESEARCH_API_URL }}
+        run: npm run build
+
+      - name: Verify Pages artifact
+        env:
+          VITE_RESEARCH_API_URL: ${{ vars.RESEARCH_API_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync, readdirSync } from 'node:fs';
+
+          const required = [
+            'dist/index.html',
+            'dist/favicon.svg',
+            'dist/apple-touch-icon.png',
+            'dist/icon-192.png',
+            'dist/icon-512.png',
+            'dist/manifest.webmanifest',
+            'dist/social-card.png',
+            'dist/sw.js',
+          ];
+          for (const path of required) {
+            if (!existsSync(path)) throw new Error(`Missing Pages artifact: ${path}`);
+          }
+
+          const html = readFileSync('dist/index.html', 'utf8');
+          if (!html.includes('/research/assets/')) throw new Error('Built assets do not use the /research/ base.');
+          if (!html.includes('/research/manifest.webmanifest')) throw new Error('Manifest link does not use /research/.');
+
+          const manifest = JSON.parse(readFileSync('dist/manifest.webmanifest', 'utf8'));
+          for (const field of ['id', 'start_url', 'scope']) {
+            if (manifest[field] !== '/research/') throw new Error(`Manifest ${field} must be /research/.`);
+          }
+          for (const icon of manifest.icons ?? []) {
+            if (!icon.src.startsWith('/research/')) throw new Error(`Manifest icon escapes /research/: ${icon.src}`);
+          }
+
+          const assetText = readdirSync('dist/assets')
+            .filter((name) => name.endsWith('.js'))
+            .map((name) => readFileSync(`dist/assets/${name}`, 'utf8'))
+            .join('\n');
+          if (!assetText.includes(process.env.VITE_RESEARCH_API_URL)) {
+            throw new Error('The production Research API URL was not injected into the frontend bundle.');
+          }
+          NODE
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
