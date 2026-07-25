@@ -1,28 +1,108 @@
 import { describe, expect, it } from 'vitest';
-import { clearResearchStateLocalStorage } from '../src/store';
+import {
+  createSet,
+  defaultData,
+  deleteSet,
+  exportSetJson,
+  getProgress,
+  loadData,
+  masteryPercent,
+  memoryStorage,
+  parseSetExport,
+  recordAnswer,
+  saveData,
+  toggleStar,
+  upsertSet,
+  weakCardIds,
+  withProgress,
+} from '../src/lib/store';
 
-function memoryStorage(entries: Array<[string, string]>) {
-  const values = new Map(entries);
-  const storage: Pick<Storage, 'key' | 'length' | 'removeItem'> = {
-    get length() { return values.size; },
-    key(index) { return [...values.keys()][index] ?? null; },
-    removeItem(key) { values.delete(key); },
-  };
-  return { storage, values };
-}
+describe('persistence round-trip', () => {
+  it('saves and reloads sets and progress', () => {
+    const storage = memoryStorage();
+    let data = defaultData();
+    const set = createSet('Bio', '# Bio\n- **ATP**: energy\n', 1000);
+    data = upsertSet(data, set);
+    data = withProgress(data, set.id, recordAnswer(getProgress(data, set.id), 'card1', true, 2000));
+    saveData(data, storage);
 
-describe('research local-state cleanup', () => {
-  it('removes the primary state and every recovery copy without touching unrelated keys', () => {
-    const { storage, values } = memoryStorage([
-      ['sift-research-state-v1', 'current'],
-      ['sift-research-recovery-100', 'first corrupt copy'],
-      ['sift-research-recovery-200', 'second corrupt copy'],
-      ['sift-active-paper', 'paper-1'],
-      ['another-app', 'keep'],
-    ]);
+    const loaded = loadData(storage);
+    expect(loaded.sets).toHaveLength(1);
+    expect(loaded.sets[0].title).toBe('Bio');
+    expect(loaded.progress[set.id].cards.card1.box).toBe(2);
+    expect(loaded.progress[set.id].cards.card1.seen).toBe(1);
+  });
 
-    clearResearchStateLocalStorage(storage);
+  it('survives corrupt storage payloads', () => {
+    const storage = memoryStorage();
+    storage.setItem('recall.data.v1', '{not json');
+    expect(loadData(storage)).toEqual(defaultData());
+    storage.setItem('recall.data.v1', JSON.stringify({ version: 9, sets: [{ bogus: true }], theme: 'neon' }));
+    const loaded = loadData(storage);
+    expect(loaded.sets).toEqual([]);
+    expect(loaded.theme).toBe('auto');
+  });
+});
 
-    expect([...values.keys()]).toEqual(['sift-active-paper', 'another-app']);
+describe('mastery ladder', () => {
+  it('climbs on correct answers and drops to learning on wrong ones', () => {
+    let progress = getProgress(defaultData(), 'set');
+    progress = recordAnswer(progress, 'c', true, 1); // unseen -> 2
+    expect(progress.cards.c.box).toBe(2);
+    progress = recordAnswer(progress, 'c', true, 2); // -> 3
+    expect(progress.cards.c.box).toBe(3);
+    progress = recordAnswer(progress, 'c', true, 3); // stays 3
+    expect(progress.cards.c.box).toBe(3);
+    progress = recordAnswer(progress, 'c', false, 4); // -> 1
+    expect(progress.cards.c.box).toBe(1);
+    expect(progress.cards.c.correct).toBe(3);
+    expect(progress.cards.c.wrong).toBe(1);
+  });
+
+  it('computes mastery percent and weak cards', () => {
+    let progress = getProgress(defaultData(), 'set');
+    progress = recordAnswer(progress, 'a', true, 1);
+    progress = recordAnswer(progress, 'a', true, 2); // a mastered (3)
+    progress = recordAnswer(progress, 'b', false, 3); // b learning (1)
+    expect(masteryPercent(progress, ['a', 'b'])).toBe(Math.round((4 / 6) * 100));
+    expect([...weakCardIds(progress, ['a', 'b', 'c'])]).toEqual(['b', 'c']);
+    expect(masteryPercent(progress, [])).toBe(0);
+  });
+
+  it('toggles stars without touching stats', () => {
+    let progress = getProgress(defaultData(), 'set');
+    progress = toggleStar(progress, 'x');
+    expect(progress.cards.x.starred).toBe(true);
+    expect(progress.cards.x.seen).toBe(0);
+    progress = toggleStar(progress, 'x');
+    expect(progress.cards.x.starred).toBe(false);
+  });
+});
+
+describe('set management and export', () => {
+  it('upserts, deletes, and round-trips exports', () => {
+    let data = defaultData();
+    const set = createSet('Chem', '# Chem', 5);
+    data = upsertSet(data, set);
+    data = upsertSet(data, { ...set, title: 'Chemistry' });
+    expect(data.sets).toHaveLength(1);
+    expect(data.sets[0].title).toBe('Chemistry');
+
+    const json = exportSetJson(data.sets[0]);
+    const imported = parseSetExport(json);
+    expect(imported.title).toBe('Chemistry');
+    expect(imported.markdown).toBe('# Chem');
+    expect(() => parseSetExport('{"format":"other"}')).toThrow();
+
+    data = withProgress(data, set.id, recordAnswer(getProgress(data, set.id), 'c', true, 6));
+    data = deleteSet(data, set.id);
+    expect(data.sets).toHaveLength(0);
+    expect(data.progress[set.id]).toBeUndefined();
+  });
+
+  it('generates distinct ids for different content and times', () => {
+    const a = createSet('A', 'alpha', 1);
+    const b = createSet('B', 'beta', 2);
+    expect(a.id).not.toBe(b.id);
   });
 });

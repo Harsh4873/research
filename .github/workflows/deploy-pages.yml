@@ -33,49 +33,22 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Test frontend
+      - name: Test
         run: npm test
 
-      - name: Check frontend types
+      - name: Check types
         run: npm run typecheck
 
-      - name: Install backend dependencies
-        working-directory: backend
-        run: npm ci
-
-      - name: Test backend
-        working-directory: backend
-        run: npm test
-
-      - name: Check backend types
-        working-directory: backend
-        run: npm run typecheck
-
-      - name: Build backend
-        working-directory: backend
-        run: npm run build
-
-      - name: Require production API URL
-        env:
-          VITE_RESEARCH_API_URL: ${{ vars.RESEARCH_API_URL }}
-        run: |
-          test -n "$VITE_RESEARCH_API_URL"
-          node -e "new URL(process.env.VITE_RESEARCH_API_URL)"
-
-      - name: Build frontend
-        env:
-          VITE_RESEARCH_API_URL: ${{ vars.RESEARCH_API_URL }}
+      - name: Build
         run: npm run build
 
       - name: Verify Pages artifact
-        env:
-          VITE_RESEARCH_API_URL: ${{ vars.RESEARCH_API_URL }}
         run: |
           node --input-type=module <<'NODE'
-          import { existsSync, readFileSync, readdirSync } from 'node:fs';
+          import { existsSync, readFileSync } from 'node:fs';
 
           const required = [
             'dist/index.html',
@@ -101,14 +74,6 @@ jobs:
           }
           for (const icon of manifest.icons ?? []) {
             if (!icon.src.startsWith('/research/')) throw new Error(`Manifest icon escapes /research/: ${icon.src}`);
-          }
-
-          const assetText = readdirSync('dist/assets')
-            .filter((name) => name.endsWith('.js'))
-            .map((name) => readFileSync(`dist/assets/${name}`, 'utf8'))
-            .join('\n');
-          if (!assetText.includes(process.env.VITE_RESEARCH_API_URL)) {
-            throw new Error('The production Research API URL was not injected into the frontend bundle.');
           }
           NODE
 

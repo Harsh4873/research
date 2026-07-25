@@ -1,15 +1,6 @@
 node_modules
 dist
-.firebase
-firebase-debug.log
-firestore-debug.log
-*.local
-.env
-.env.*
-!.env.example
-backend/.vercel
-backend/node_modules
-backend/dist
 coverage
+*.local
 .DS_Store
 AGENTS.md
