@@ -1,56 +1,38 @@
-# Sift architecture
+# Architecture
 
-## Data flow
+Recall is a client-side React + Vite single-page app; the deployed site is static files on GitHub Pages served under `/research/`. There is no app server. The only runtime network I/O is the optional Firebase sync (Google auth + Firestore), which stays completely unloaded until the user turns Sync on.
 
-```text
-PDF selected
-  ├─> IndexedDB Blob (this device only)
-  ├─> PDF.js text/page index (this device)
-  ├─> explicit Local Analysis action
-  │     └─> on-device text/layout extraction
-  │           └─> deterministic extractive brief + page receipts
-  └─> explicit AI Analysis action
-        └─> authenticated Vercel API
-              ├─> chunked OpenAI Upload
-              └─> Responses API structured paper analysis
-                    └─> Firestore metadata + analysis sync
+## Pipeline
 
-Contextual question
-  └─> active paper + tab + page + selected text + recent chat
-        └─> authenticated Vercel API
-              └─> Responses API grounded in uploaded PDF
+```
+markdown text
+  → lib/markdown.ts   parse to a block model (headings, paragraphs, lists, tables, quotes, code)
+  → lib/extract.ts    derive study material: term/definition cards, cloze sentences, section outline, stats
+  → lib/questions.ts  build multiple-choice quizzes and match rounds (seeded RNG, word-overlap distractors)
+  → components/*      study modes render the derived material
 ```
 
-## Paper analysis contract
+Study material is always **derived** from the stored markdown at load time (memoized per set). Storage keeps only the source markdown plus progress, so extraction improvements apply retroactively to existing sets.
 
-An analysis is useful only when it preserves the paper's internal structure and makes uncertainty inspectable. The canonical response therefore contains:
+## Modules
 
-- citation metadata and stable source links;
-- plain-language orientation and research question;
-- section summaries with page ranges;
-- methods, data, populations, baselines, and evaluation design;
-- findings separated from the authors' interpretation;
-- important figures and tables with page, caption, takeaway, and reading caveats;
-- important equations with page, notation, role, assumptions, and plain-language meaning;
-- a claim ledger with evidence excerpts, page references, confidence, and caveats;
-- limitations, threats to validity, unresolved questions, and possible follow-up work;
-- glossary and references worth following.
+- `src/lib/markdown.ts` — small deterministic Markdown parser producing typed blocks with inline runs (bold, italic, code, links). ATX headings only; front matter is skipped (a `title:` is honored).
+- `src/lib/extract.ts` — heuristics that turn blocks into cards: bold-term bullets (`**Term** — definition`), plain `Term: definition` bullets, two-plus-column tables, `Q:`/`A:` pairs, and cloze sentences built by blanking a bold phrase or a known term inside prose sentences. Cards get stable content-hash ids so progress survives re-parsing.
+- `src/lib/questions.ts` — quiz builder (term→definition, definition→term, and cloze multiple choice) with distractors preferred by word overlap, plus match-round sampling. Uses a seeded mulberry32 PRNG so tests are deterministic.
+- `src/lib/answer.ts` — typed-answer checking: Unicode/diacritic normalization, punctuation and leading-article stripping, and length-scaled Levenshtein tolerance.
+- `src/lib/store.ts` — versioned `localStorage` persistence (`recall.data.v1`) for sets, per-card progress boxes, match best times, and theme preference. Works against an injectable storage so tests run in Node without a DOM.
+- `src/App.tsx` — hash router (`#/`, `#/set/<id>/<mode>`) so deep links work on GitHub Pages without a SPA fallback.
+- `public/sw.js` — cache-first app-shell service worker; its activate step also deletes caches left behind by the previous app that lived at this scope.
 
-Every generated factual item should carry a page or explicit `not located` signal. The UI must never present an ungrounded model inference as though it were stated by the paper.
+## Sync
 
-Local Analysis uses the same canonical contract as AI Analysis so briefs, notes, ledgers, evidence navigation, and sync behave consistently. Its output is intentionally extractive: section-aware sentence ranking, captions, equation-like lines, identifiers, and evidence excerpts are derived from the PDF text layer. It labels interpretation limits and does not claim to understand image-only figures, malformed text layers, or mathematical meaning that is not stated nearby.
+Sync is optional and lazy: `src/lib/cloud.ts` (and the Firebase SDK with it) is `import()`ed only when the user enables Sync or has it enabled from a previous session (`recall.sync.on` flag).
 
-Each active analysis owns a short, renewable lease in the paper record. The lease carries a run ID, browser-session owner, mode, and heartbeat time. When private sync is online, Firestore transactions atomically claim, renew, complete, cancel, retry, or release that lease and update only analysis-owned fields; concurrent sessions cannot both acquire the same fresh paper, and unrelated title or source edits are preserved. Paper metadata and analysis use separate clocks (`updatedAt` and optional `analysisUpdatedAt`), while `analysisRunId` retains completion provenance after the lease clears. Paper-aware merges combine newer metadata with newer analysis state, and a canonical active cloud run cannot be displaced by a different signed-out/offline run during bootstrap or quiet-snapshot repair. Firestore rules reject analysis-clock regression and same-revision analysis changes, while remaining compatible with older records that do not yet have the optional analysis clock. Signed-out Local Analysis uses the same run-ID checks in the local store plus a cross-tab settle check. AI Analysis must acquire its online lease before any upload or API work begins. If a browser disappears, the UI marks the lease stale after three minutes and offers an explicit unlock instead of leaving the paper permanently stuck.
+- `src/firebase.ts` — shared-project Firebase init (named app, persistent Firestore cache, Google provider). The web config is public by design; access control lives in the rules.
+- `src/lib/sync-core.ts` — pure, unit-tested merge logic. Sets replicate to `recall_users/{uid}/sets/{setId}` and progress to `recall_users/{uid}/progress/{setId}`. Deletions write tombstones (`deleted`, `deletedAt`) so they propagate; live docs win by `updatedAt` (last writer wins), per-card progress wins by `last` touch, and match best-times keep the minimum. `planPush` diffs local state against the last-known remote index so only strictly-newer docs are written.
+- `src/lib/cloud.ts` — Firestore adapter: snapshot listeners fold remote changes into app state, local changes push through a debounced diff, and auth uses popup sign-in with a redirect fallback for installed PWAs. Permission errors surface a "deploy the rules" message rather than failing silently.
+- `firestore.rules` — the complete ruleset for every app in the shared Firebase project; Recall's block validates doc shapes, enforces the owner-only Google account, keeps `createdAt` immutable, and requires monotonic `updatedAt`. Covered by `tests/firestore.rules.test.ts` against the emulator (`npm run test:rules`).
 
-The source-only evaluation harness pins the exact SHA-256 bytes of three official arXiv PDFs (Attention, Adam, and BERT), runs the local engine twice, and checks schema validity, deterministic output, section coverage, page ranges, exact evidence-quote matches, and the sync-size ceiling. It never renders or screenshots the papers.
+## Testing
 
-## Security invariants
-
-- OpenAI credentials exist only in the serverless environment.
-- All non-health API routes require a valid Firebase ID token.
-- Token claims must match the Firebase project, issuer, verified Google provider, configured UID owner, and configured email owner.
-- CORS accepts only the configured frontend origin.
-- OpenAI Responses use `store: false`; Sift stores only the result it needs.
-- PDF chunks and JSON payloads have explicit size limits.
-- Prompts treat paper text and user-selected text as data, never instructions.
-- Firestore rejects unknown collections and all non-owner access.
+Vitest (Node environment) covers the parser, extraction heuristics, question building, answer checking, and storage round-trips. `npm run build` type-checks then produces `dist/`, which the Pages workflow verifies before deploying.

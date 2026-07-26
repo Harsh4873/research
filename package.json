@@ -1,12 +1,11 @@
 {
-  "name": "harsh-sift-research",
-  "version": "1.0.0",
+  "name": "recall-study-guide",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "evaluate:local": "vite-node scripts/evaluate-local-analysis.ts",
     "test": "vitest run",
     "test:rules": "firebase emulators:exec --project demo-research --only firestore \"vitest run tests/firestore.rules.test.ts\"",
     "typecheck": "tsc --noEmit",
@@ -14,12 +13,9 @@
   },
   "dependencies": {
     "firebase": "^12.16.0",
-    "idb": "^8.0.3",
     "lucide-react": "^0.468.0",
-    "pdfjs-dist": "^6.1.200",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "zod": "^4.4.3"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",

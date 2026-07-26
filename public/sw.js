@@ -1,5 +1,7 @@
-const CACHE_PREFIX = 'sift-shell-';
+const CACHE_PREFIX = 'recall-shell-';
 const CACHE_NAME = `${CACHE_PREFIX}v1`;
+// The previous app at this scope used these cache names; clear them on takeover.
+const LEGACY_PREFIXES = ['sift-shell-'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -13,7 +15,9 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys
-        .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+        .filter((key) =>
+          LEGACY_PREFIXES.some((prefix) => key.startsWith(prefix)) ||
+          (key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME))
         .map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );

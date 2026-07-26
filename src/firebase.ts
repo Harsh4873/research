@@ -11,8 +11,9 @@ import {
   persistentMultipleTabManager,
 } from 'firebase/firestore';
 
-// A named app isolates Sift's auth/cache instance from other harsh.bet apps
-// that share the same origin and Firebase project.
+// The named app isolates Recall's auth/cache instance from other harsh.bet
+// apps that share the same origin and Firebase project. The name is kept from
+// the previous app at this path so existing signed-in sessions carry over.
 const APP_NAME = 'research';
 
 const firebaseConfig = {
@@ -36,7 +37,7 @@ googleProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
-export const researchFirestore = initializeFirestore(firebaseApp, {
+export const recallFirestore = initializeFirestore(firebaseApp, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager(),
   }),

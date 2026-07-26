@@ -1,239 +1,195 @@
 import { describe, expect, it } from 'vitest';
-import { createStarterState, type Paper, type ResearchState } from '../src/model';
+import type { AppData, StudySet } from '../src/model';
+import { defaultData, recordAnswer, toggleStar } from '../src/lib/store';
 import {
-  mergeStates,
-  mergePaperRecords,
-  omitUndefinedDeep,
-  resolveInitialSync,
-  selectEntityWinner,
-  selectNewer,
-  stableStringify,
-} from '../src/sync-core';
+  applyRemoteProgress,
+  applyRemoteSets,
+  emptyRemoteIndex,
+  planPush,
+  progressStamp,
+  progressToRemote,
+  setToRemote,
+  tombstoneToRemote,
+  type RemoteIndex,
+  type RemoteSet,
+} from '../src/lib/sync-core';
 
-const EARLY = '2026-07-13T10:00:00.000Z';
-const LATE = '2026-07-13T11:00:00.000Z';
-const FINAL = '2026-07-13T12:00:00.000Z';
-
-function paper(overrides: Partial<Paper> = {}): Paper {
-  return {
-    id: 'paper-1',
-    createdAt: EARLY,
-    updatedAt: EARLY,
-    title: 'Study',
-    authors: [],
-    file: { storageKey: 'paper-1', name: 'study.pdf', sizeBytes: 100, mimeType: 'application/pdf' },
-    tags: [],
-    favorite: false,
-    archived: false,
-    analysisStatus: 'local',
-    ...overrides,
-  };
+function makeSet(id: string, updatedAt: number, markdown = `# ${id}`): StudySet {
+  return { id, title: id, markdown, createdAt: 1, updatedAt };
 }
 
-function state(papers: Paper[] = []): ResearchState {
-  return { ...createStarterState(EARLY), papers };
+function dataWith(sets: StudySet[], extra: Partial<AppData> = {}): AppData {
+  return { ...defaultData(), sets, ...extra };
 }
 
-describe('research conflict resolution', () => {
-  it('uses timestamps for singleton conflicts and canonical JSON for exact ties', () => {
-    const older = { updatedAt: EARLY, value: 'z' };
-    const newer = { updatedAt: LATE, value: 'a' };
-    expect(selectNewer(older, newer)).toBe(newer);
+function remoteLive(id: string, updatedAt: number, markdown = `# remote ${id}`): RemoteSet {
+  return { id, title: `remote ${id}`, markdown, createdAt: 1, updatedAt };
+}
 
-    const tiedA = { updatedAt: EARLY, value: 'a' };
-    const tiedZ = { updatedAt: EARLY, value: 'z' };
-    expect(selectNewer(tiedA, tiedZ)).toEqual(selectNewer(tiedZ, tiedA));
+function remoteTombstone(id: string, deletedAt: number): RemoteSet {
+  return { id, title: 'Deleted set', markdown: '', createdAt: 1, updatedAt: deletedAt, deleted: true, deletedAt };
+}
+
+describe('applyRemoteSets', () => {
+  it('adds unknown remote sets and replaces older local copies', () => {
+    const local = dataWith([makeSet('a', 10)]);
+    const { data, changed } = applyRemoteSets(local, [remoteLive('a', 20), remoteLive('b', 5)]);
+    expect(changed).toBe(true);
+    expect(data.sets.find((s) => s.id === 'a')?.markdown).toBe('# remote a');
+    expect(data.sets.some((s) => s.id === 'b')).toBe(true);
   });
 
-  it('never resurrects a tombstone, even when a live edit has a later wall clock', () => {
-    const deleted = paper({ updatedAt: EARLY, deleted: true, deletedAt: EARLY });
-    const laterLive = paper({ updatedAt: LATE, title: 'Offline edit' });
-    expect(selectEntityWinner(deleted, laterLive).deleted).toBe(true);
-    expect(selectEntityWinner(laterLive, deleted).deleted).toBe(true);
-    expect(mergeStates(state([laterLive]), state([deleted])).papers[0].deleted).toBe(true);
+  it('keeps newer local edits and reports no change for stale remotes', () => {
+    const local = dataWith([makeSet('a', 30)]);
+    const { data, changed } = applyRemoteSets(local, [remoteLive('a', 20)]);
+    expect(changed).toBe(false);
+    expect(data).toBe(local);
+    expect(data.sets[0].markdown).toBe('# a');
   });
 
-  it('keeps independently created records and deterministically sorts them', () => {
-    const first = paper({ id: 'paper-a', file: { ...paper().file, storageKey: 'paper-a' } });
-    const second = paper({ id: 'paper-b', file: { ...paper().file, storageKey: 'paper-b' } });
-    expect(mergeStates(state([second]), state([first])).papers.map((item) => item.id))
-      .toEqual(['paper-a', 'paper-b']);
+  it('applies remote tombstones, removing the set and its progress', () => {
+    let local = dataWith([makeSet('a', 10)]);
+    local = { ...local, progress: { a: { cards: {} } } };
+    const { data, changed } = applyRemoteSets(local, [remoteTombstone('a', 20)]);
+    expect(changed).toBe(true);
+    expect(data.sets).toHaveLength(0);
+    expect(data.progress.a).toBeUndefined();
+    expect(data.tombstones.a).toBe(20);
   });
 
-  it('keeps an active analysis generation across a later stale metadata edit', () => {
-    const active = paper({
-      analysisStatus: 'analyzing',
-      analysisProgress: 40,
-      analysisUpdatedAt: LATE,
-      analysisLease: {
-        runId: 'analysis-run-1',
-        ownerId: 'research-tab-1',
-        mode: 'local',
-        heartbeatAt: LATE,
+  it('lets a local edit made after the remote delete survive (revival)', () => {
+    const local = dataWith([makeSet('a', 30)]);
+    const { data, changed } = applyRemoteSets(local, [remoteTombstone('a', 20)]);
+    expect(changed).toBe(false);
+    expect(data.sets).toHaveLength(1);
+    expect(data.tombstones.a).toBeUndefined();
+    // The next push re-uploads the newer set over the remote tombstone.
+    const plan = planPush(data, indexFrom([remoteTombstone('a', 20)]));
+    expect(plan.sets.map((s) => s.id)).toEqual(['a']);
+    expect(plan.tombstones).toHaveLength(0);
+  });
+
+  it('does not resurrect a set deleted locally until the tombstone is pushed', () => {
+    const local = dataWith([], { tombstones: { a: 50 } });
+    const { data, changed } = applyRemoteSets(local, [remoteLive('a', 40)]);
+    expect(changed).toBe(false);
+    expect(data.sets).toHaveLength(0);
+  });
+
+  it('revives when the remote copy is newer than the local tombstone', () => {
+    const local = dataWith([], { tombstones: { a: 50 } });
+    const { data } = applyRemoteSets(local, [remoteLive('a', 60)]);
+    expect(data.sets).toHaveLength(1);
+    expect(data.tombstones.a).toBeUndefined();
+  });
+});
+
+describe('applyRemoteProgress', () => {
+  it('merges per card by most recent touch and keeps the fastest match time', () => {
+    let localProgress = recordAnswer({ cards: {} }, 'c1', true, 100);
+    localProgress = recordAnswer(localProgress, 'c2', false, 200);
+    localProgress = { ...localProgress, bestMatchMs: 9000 };
+    const local = dataWith([makeSet('a', 1)], { progress: { a: localProgress } });
+
+    const remote = progressToRemote(
+      'a',
+      {
+        cards: {
+          c1: { box: 1, seen: 5, correct: 2, wrong: 3, starred: true, last: 50 }, // older, loses
+          c2: { box: 3, seen: 4, correct: 4, wrong: 0, starred: false, last: 300 }, // newer, wins
+          c3: { box: 2, seen: 1, correct: 1, wrong: 0, starred: false, last: 400 }, // new card
+        },
+        bestMatchMs: 7000,
       },
-    });
-    const staleMetadataEdit = paper({
-      updatedAt: FINAL,
-      title: 'Edited in another tab',
-      tags: ['review'],
-    });
+      400,
+    );
 
-    const merged = mergePaperRecords(active, staleMetadataEdit);
-
-    expect(merged).toMatchObject({
-      title: 'Edited in another tab',
-      tags: ['review'],
-      updatedAt: FINAL,
-      analysisStatus: 'analyzing',
-      analysisProgress: 40,
-      analysisUpdatedAt: LATE,
-      analysisLease: active.analysisLease,
-    });
-    expect(mergePaperRecords(staleMetadataEdit, active)).toEqual(merged);
+    const { data, changed } = applyRemoteProgress(local, remote);
+    expect(changed).toBe(true);
+    const merged = data.progress.a;
+    expect(merged.cards.c1.box).toBe(2); // local kept
+    expect(merged.cards.c2.box).toBe(3); // remote won
+    expect(merged.cards.c3).toBeDefined();
+    expect(merged.bestMatchMs).toBe(7000);
   });
 
-  it('accepts a later transactional completion without losing newer metadata', () => {
-    const active = paper({
-      analysisStatus: 'analyzing',
-      analysisProgress: 40,
-      analysisUpdatedAt: LATE,
-      analysisLease: {
-        runId: 'analysis-run-1',
-        ownerId: 'research-tab-1',
-        mode: 'local',
-        heartbeatAt: LATE,
-      },
-    });
-    const metadataEdit = paper({
-      updatedAt: FINAL,
-      title: 'Concurrent metadata title',
-      tags: ['review'],
-    });
-    const completed = paper({
-      analysisStatus: 'local',
-      analysisProgress: undefined,
-      analysisUpdatedAt: '2026-07-13T12:30:00.000Z',
-    });
-
-    const merged = mergePaperRecords(mergePaperRecords(active, metadataEdit), completed);
-
-    expect(merged).toMatchObject({
-      title: 'Concurrent metadata title',
-      tags: ['review'],
-      updatedAt: FINAL,
-      analysisStatus: 'local',
-      analysisUpdatedAt: '2026-07-13T12:30:00.000Z',
-    });
-    expect(merged.analysisLease).toBeUndefined();
-    expect(merged.analysisProgress).toBeUndefined();
+  it('is a no-op when remote holds nothing newer', () => {
+    const progress = recordAnswer({ cards: {} }, 'c1', true, 500);
+    const local = dataWith([makeSet('a', 1)], { progress: { a: progress } });
+    const remote = progressToRemote('a', recordAnswer({ cards: {} }, 'c1', false, 100), 100);
+    const { data, changed } = applyRemoteProgress(local, remote);
+    expect(changed).toBe(false);
+    expect(data).toBe(local);
   });
 
-  it('keeps deletion irreversible without dropping a concurrent active generation', () => {
-    const active = paper({
-      analysisStatus: 'analyzing',
-      analysisUpdatedAt: LATE,
-      analysisLease: {
-        runId: 'analysis-run-1',
-        ownerId: 'research-tab-1',
-        mode: 'local',
-        heartbeatAt: LATE,
-      },
-    });
-    const staleTombstone = paper({
-      updatedAt: FINAL,
-      deleted: true,
-      deletedAt: FINAL,
-    });
+  it('ignores progress for sets tombstoned locally', () => {
+    const local = dataWith([], { tombstones: { a: 10 } });
+    const remote = progressToRemote('a', recordAnswer({ cards: {} }, 'c1', true, 5), 5);
+    expect(applyRemoteProgress(local, remote).changed).toBe(false);
+  });
+});
 
-    const merged = mergePaperRecords(active, staleTombstone);
+function indexFrom(remote: RemoteSet[], progress: Record<string, number> = {}): RemoteIndex {
+  const index = emptyRemoteIndex();
+  for (const r of remote) {
+    index.sets.set(r.id, {
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      deleted: r.deleted === true,
+      deletedAt: r.deletedAt ?? 0,
+    });
+  }
+  for (const [id, at] of Object.entries(progress)) index.progress.set(id, at);
+  return index;
+}
 
-    expect(merged.deleted).toBe(true);
-    expect(merged.analysisLease).toEqual(active.analysisLease);
-    expect(merged.analysisUpdatedAt).toBe(LATE);
+describe('planPush', () => {
+  it('pushes only strictly newer sets, tombstones, and progress', () => {
+    const progress = toggleStar(recordAnswer({ cards: {} }, 'c1', true, 500), 'c2', 600);
+    const data = dataWith([makeSet('new', 100), makeSet('same', 50)], {
+      tombstones: { gone: 70 },
+      progress: { new: progress, same: { cards: {} } },
+    });
+    const index = indexFrom([remoteLive('same', 50), remoteLive('gone', 60)], { same: 999 });
+    const plan = planPush(data, index);
+    expect(plan.sets.map((s) => s.id)).toEqual(['new']);
+    expect(plan.tombstones).toEqual([{ id: 'gone', deletedAt: 70, createdAt: 1 }]);
+    expect(plan.progress).toEqual([{ setId: 'new', progress, updatedAt: 600 }]);
   });
 
-  it('protects a different canonical cloud run from a newer offline completion', () => {
-    const cloudActive = paper({
-      analysisStatus: 'analyzing',
-      analysisUpdatedAt: LATE,
-      analysisRunId: 'cloud-run',
-      analysisLease: {
-        runId: 'cloud-run',
-        ownerId: 'cloud-tab',
-        mode: 'ai',
-        heartbeatAt: LATE,
-      },
-    });
-    const offlineCompletion = paper({
-      updatedAt: FINAL,
-      title: 'Offline metadata edit',
-      analysisStatus: 'local',
-      analysisUpdatedAt: '2026-07-13T13:00:00.000Z',
-      analysisRunId: 'offline-run',
-    });
-
-    const resolution = resolveInitialSync(state([offlineCompletion]), state([cloudActive]));
-
-    expect(resolution.state.papers[0]).toMatchObject({
-      title: 'Offline metadata edit',
-      updatedAt: FINAL,
-      analysisStatus: 'analyzing',
-      analysisUpdatedAt: LATE,
-      analysisRunId: 'cloud-run',
-      analysisLease: cloudActive.analysisLease,
-    });
-    expect(resolution.uploadPapers[0]).toMatchObject({
-      title: 'Offline metadata edit',
-      analysisRunId: 'cloud-run',
-      analysisLease: cloudActive.analysisLease,
-    });
-    expect(mergePaperRecords(
-      cloudActive,
-      offlineCompletion,
-      { preferredActiveSide: 'left' },
-    ).analysisRunId).toBe('cloud-run');
+  it('skips tombstones already deleted remotely and oversized sets', () => {
+    const big = makeSet('big', 10, 'x'.repeat(600_001));
+    const data = dataWith([big], { tombstones: { gone: 70 } });
+    const plan = planPush(data, indexFrom([remoteTombstone('gone', 80)]));
+    expect(plan.tombstones).toHaveLength(0);
+    expect(plan.sets).toHaveLength(0);
+    expect(plan.oversized).toEqual(['big']);
   });
 
-  it('allows the same run terminal transaction to clear the cloud lease', () => {
-    const cloudActive = paper({
-      analysisStatus: 'analyzing',
-      analysisUpdatedAt: LATE,
-      analysisRunId: 'shared-run',
-      analysisLease: {
-        runId: 'shared-run',
-        ownerId: 'cloud-tab',
-        mode: 'local',
-        heartbeatAt: LATE,
-      },
-    });
-    const completion = paper({
-      analysisStatus: 'local',
-      analysisUpdatedAt: FINAL,
-      analysisRunId: 'shared-run',
-    });
+  it('does not push a tombstone over a newer remote edit', () => {
+    const data = dataWith([], { tombstones: { a: 50 } });
+    const plan = planPush(data, indexFrom([remoteLive('a', 60)]));
+    expect(plan.tombstones).toHaveLength(0);
+  });
+});
 
-    const resolved = resolveInitialSync(state([completion]), state([cloudActive])).state.papers[0];
-
-    expect(resolved.analysisStatus).toBe('local');
-    expect(resolved.analysisLease).toBeUndefined();
-    expect(resolved.analysisRunId).toBe('shared-run');
+describe('remote document builders', () => {
+  it('round numbers and shape docs for Firestore rules', () => {
+    const set = makeSet('a', 10.6);
+    expect(setToRemote(set).updatedAt).toBe(11);
+    const tomb = tombstoneToRemote('a', 20.2, 5.8);
+    expect(tomb).toMatchObject({ deleted: true, deletedAt: 20, createdAt: 6, markdown: '' });
+    const progress = progressToRemote('a', { cards: { c: { box: 2, seen: 1, correct: 1, wrong: 0, starred: false, last: 3.9 } } }, 3.9);
+    expect(progress.cards.c.last).toBe(4);
+    expect(progress.updatedAt).toBe(4);
+    expect('bestMatchMs' in progress).toBe(false);
   });
 
-  it('reports only records that must repair or initialize the cloud', () => {
-    const localPaper = paper({ updatedAt: LATE, title: 'Local winner' });
-    const cloudPaper = paper({ title: 'Cloud older' });
-    const resolution = resolveInitialSync(state([localPaper]), state([cloudPaper]));
-    expect(resolution.state.papers[0].title).toBe('Local winner');
-    expect(resolution.uploadPapers).toEqual([localPaper]);
-
-    const firstSync = resolveInitialSync(state([localPaper]), null);
-    expect(firstSync.uploadProfile).toBe(true);
-    expect(firstSync.uploadPapers).toEqual([localPaper]);
-  });
-
-  it('serializes without undefined values or unstable object key ordering', () => {
-    expect(omitUndefinedDeep({ b: undefined, a: [1, undefined, 2], c: null }))
-      .toEqual({ a: [1, 2], c: null });
-    expect(stableStringify({ z: 1, a: 2 })).toBe(stableStringify({ a: 2, z: 1 }));
+  it('progressStamp is the max card touch time', () => {
+    let p = recordAnswer({ cards: {} }, 'a', true, 100);
+    p = recordAnswer(p, 'b', true, 300);
+    p = recordAnswer(p, 'c', false, 200);
+    expect(progressStamp(p)).toBe(300);
+    expect(progressStamp({ cards: {} })).toBe(0);
   });
 });

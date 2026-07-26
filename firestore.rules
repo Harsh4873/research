@@ -606,6 +606,92 @@ service cloud.firestore {
       }
     }
 
+    // Recall (markdown study guide, lives at /research/) -----------
+    function ownsRecallData(userId) {
+      return isAuthorizedGoogleAccount() && request.auth.uid == userId;
+    }
+
+    function isValidRecallId(value) {
+      return value is string
+        && value.size() > 0
+        && value.size() <= 128
+        && value.matches('^[A-Za-z0-9_-]+$');
+    }
+
+    // A study set is either live (no tombstone fields) or deleted
+    // (deleted == true with an int millisecond timestamp).
+    function isValidRecallTombstone() {
+      return (
+        !('deleted' in request.resource.data)
+        && !('deletedAt' in request.resource.data)
+      ) || (
+        request.resource.data.deleted == true
+        && ('deletedAt' in request.resource.data)
+        && request.resource.data.deletedAt is int
+      );
+    }
+
+    function isValidRecallSet(setId) {
+      return request.resource.data.keys().hasAll([
+          'id', 'title', 'markdown', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'id', 'title', 'markdown', 'createdAt', 'updatedAt', 'deleted', 'deletedAt'
+        ])
+        && request.resource.data.id == setId
+        && isValidRecallId(request.resource.data.id)
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 240
+        && request.resource.data.markdown is string
+        && request.resource.data.markdown.size() <= 600000
+        && request.resource.data.createdAt is int
+        && request.resource.data.updatedAt is int
+        && isValidRecallTombstone();
+    }
+
+    function keepsRecallSetHistory() {
+      return request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt >= resource.data.updatedAt;
+    }
+
+    function isValidRecallProgress(setId) {
+      return request.resource.data.keys().hasAll(['setId', 'cards', 'updatedAt'])
+        && request.resource.data.keys().hasOnly([
+          'setId', 'cards', 'updatedAt', 'bestMatchMs'
+        ])
+        && request.resource.data.setId == setId
+        && isValidRecallId(request.resource.data.setId)
+        && request.resource.data.cards is map
+        && request.resource.data.updatedAt is int
+        && (
+          !('bestMatchMs' in request.resource.data)
+          || (request.resource.data.bestMatchMs is int && request.resource.data.bestMatchMs > 0)
+        );
+    }
+
+    match /recall_users/{userId} {
+      // Recall has no root document. Sets are removed via tombstones so
+      // deletions propagate between devices; progress docs may be deleted
+      // outright once their set is tombstoned.
+      match /sets/{setId} {
+        allow read: if ownsRecallData(userId);
+        allow create: if ownsRecallData(userId) && isValidRecallSet(setId);
+        allow update: if ownsRecallData(userId)
+          && isValidRecallSet(setId)
+          && keepsRecallSetHistory();
+      }
+
+      match /progress/{setId} {
+        allow read: if ownsRecallData(userId);
+        allow create: if ownsRecallData(userId) && isValidRecallProgress(setId);
+        allow update: if ownsRecallData(userId)
+          && isValidRecallProgress(setId)
+          && request.resource.data.updatedAt >= resource.data.updatedAt;
+        allow delete: if ownsRecallData(userId);
+      }
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

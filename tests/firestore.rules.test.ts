@@ -6,15 +6,12 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import { readFile } from 'node:fs/promises';
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 import { afterAll, afterEach, beforeAll, describe, it } from 'vitest';
 
 const PROJECT_ID = 'demo-research';
-const OWNER_UID = 'research-owner';
+const OWNER_UID = 'recall-owner';
 const ALLOWED_EMAIL = 'hdav4873@gmail.com';
-const STAMP = '2026-07-13T10:00:00.000Z';
-const LATER = '2026-07-13T11:00:00.000Z';
-const FINAL = '2026-07-13T12:00:00.000Z';
 const EMULATOR_ADDRESS = process.env.FIRESTORE_EMULATOR_HOST;
 
 function authorizedContext(
@@ -30,265 +27,128 @@ function authorizedContext(
   });
 }
 
-function validProfile() {
+function validSet(overrides: Record<string, unknown> = {}) {
   return {
-    email: ALLOWED_EMAIL,
-    displayName: 'Harsh',
-    onboardingComplete: true,
-    updatedAt: STAMP,
-  };
-}
-
-function validSettings() {
-  return {
-    theme: 'system',
-    readerWidth: 'comfortable',
-    defaultZoom: 1,
-    autoAnalyze: false,
-    rememberChat: true,
-    updatedAt: STAMP,
-  };
-}
-
-function validPaper(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 'paper-1',
-    createdAt: STAMP,
-    updatedAt: STAMP,
-    title: 'Research paper',
-    authors: [],
-    file: {
-      storageKey: 'paper-1',
-      name: 'paper.pdf',
-      sizeBytes: 1_024,
-      mimeType: 'application/pdf',
-    },
-    tags: [],
-    favorite: false,
-    archived: false,
-    analysisStatus: 'local',
+    id: 'set-1',
+    title: 'Cell Biology',
+    markdown: '# Cell Biology\n\n- **ATP**: energy currency\n',
+    createdAt: 1000,
+    updatedAt: 1000,
     ...overrides,
   };
 }
 
-function validAnalysisLease(overrides: Record<string, unknown> = {}) {
+function validProgress(overrides: Record<string, unknown> = {}) {
   return {
-    runId: 'analysis-run-1',
-    ownerId: 'research-tab-1',
-    mode: 'local',
-    heartbeatAt: STAMP,
+    setId: 'set-1',
+    cards: { abc123: { box: 2, seen: 1, correct: 1, wrong: 0, starred: false, last: 1000 } },
+    updatedAt: 1000,
     ...overrides,
   };
 }
 
-function validNote() {
-  return {
-    id: 'note-1',
-    paperId: 'paper-1',
-    body: 'A useful note.',
-    color: 'amber',
-    createdAt: STAMP,
-    updatedAt: STAMP,
-  };
-}
+describe.skipIf(!EMULATOR_ADDRESS)('recall Firestore security rules', () => {
+  let env: RulesTestEnvironment;
 
-function validMessage() {
-  return {
-    id: 'message-1',
-    paperId: 'paper-1',
-    role: 'user',
-    content: 'Explain figure one.',
-    context: { tab: 'visuals', page: 4 },
-    citations: [],
-    createdAt: STAMP,
-    updatedAt: STAMP,
-  };
-}
-
-describe.skipIf(!EMULATOR_ADDRESS)('combined Firestore security rules', () => {
-  let environment: RulesTestEnvironment;
+  const setDocRef = (context: RulesTestContext, uid = OWNER_UID, setId = 'set-1') =>
+    doc(context.firestore(), 'recall_users', uid, 'sets', setId);
+  const progressDocRef = (context: RulesTestContext, uid = OWNER_UID, setId = 'set-1') =>
+    doc(context.firestore(), 'recall_users', uid, 'progress', setId);
 
   beforeAll(async () => {
     const [host, rawPort] = EMULATOR_ADDRESS!.split(':');
     const rules = await readFile(new URL('../firestore.rules', import.meta.url), 'utf8');
-    environment = await initializeTestEnvironment({
+    env = await initializeTestEnvironment({
       projectId: PROJECT_ID,
       firestore: { host, port: Number(rawPort), rules },
     });
   });
 
-  afterEach(async () => environment.clearFirestore());
-  afterAll(async () => environment.cleanup());
+  afterEach(async () => env.clearFirestore());
+  afterAll(async () => env.cleanup());
 
-  it('allows the verified Google owner to use every Sift document family', async () => {
-    const firestore = authorizedContext(environment).firestore();
-    await assertSucceeds(setDoc(doc(firestore, 'research_users', OWNER_UID, 'profile', 'current'), validProfile()));
-    await assertSucceeds(setDoc(doc(firestore, 'research_users', OWNER_UID, 'settings', 'current'), validSettings()));
-    await assertSucceeds(setDoc(doc(firestore, 'research_users', OWNER_UID, 'papers', 'paper-1'), validPaper()));
-    await assertSucceeds(setDoc(doc(firestore, 'research_users', OWNER_UID, 'notes', 'note-1'), validNote()));
-    await assertSucceeds(setDoc(doc(firestore, 'research_users', OWNER_UID, 'messages', 'message-1'), validMessage()));
-    for (const name of ['papers', 'notes', 'messages']) {
-      await assertSucceeds(getDocs(collection(firestore, 'research_users', OWNER_UID, name)));
-    }
+  describe('sets', () => {
+    it('lets the owner create, read, and update a valid set', async () => {
+      const context = authorizedContext(env);
+      await assertSucceeds(setDoc(setDocRef(context), validSet()));
+      await assertSucceeds(getDoc(setDocRef(context)));
+      await assertSucceeds(setDoc(setDocRef(context), validSet({ updatedAt: 2000, markdown: '# Edited' })));
+    });
+
+    it('accepts a valid tombstone and rejects malformed ones', async () => {
+      const context = authorizedContext(env);
+      await assertSucceeds(setDoc(setDocRef(context), validSet()));
+      await assertFails(
+        setDoc(setDocRef(context), validSet({ updatedAt: 2000, deleted: true })), // missing deletedAt
+      );
+      await assertSucceeds(
+        setDoc(setDocRef(context), validSet({ markdown: '', updatedAt: 2000, deleted: true, deletedAt: 2000 })),
+      );
+    });
+
+    it('rejects unknown fields, mismatched ids, and wrong types', async () => {
+      const context = authorizedContext(env);
+      await assertFails(setDoc(setDocRef(context), validSet({ extra: 'nope' })));
+      await assertFails(setDoc(setDocRef(context), validSet({ id: 'other-id' })));
+      await assertFails(setDoc(setDocRef(context), validSet({ updatedAt: '1000' })));
+      await assertFails(setDoc(setDocRef(context), validSet({ title: '' })));
+    });
+
+    it('blocks createdAt rewrites and updatedAt regressions', async () => {
+      const context = authorizedContext(env);
+      await assertSucceeds(setDoc(setDocRef(context), validSet({ updatedAt: 5000 })));
+      await assertFails(setDoc(setDocRef(context), validSet({ createdAt: 1, updatedAt: 6000 })));
+      await assertFails(setDoc(setDocRef(context), validSet({ updatedAt: 4000 })));
+    });
+
+    it('denies other uids, wrong or unverified emails, and signed-out access', async () => {
+      const owner = authorizedContext(env);
+      await assertSucceeds(setDoc(setDocRef(owner), validSet()));
+
+      const otherUid = authorizedContext(env, 'someone-else');
+      await assertFails(getDoc(setDocRef(otherUid, OWNER_UID)));
+      const wrongEmail = env.authenticatedContext(OWNER_UID, {
+        email: 'intruder@example.com',
+        email_verified: true,
+        firebase: { sign_in_provider: 'google.com' },
+      });
+      await assertFails(getDoc(setDocRef(wrongEmail)));
+      const unverified = authorizedContext(env, OWNER_UID, { email_verified: false });
+      await assertFails(getDoc(setDocRef(unverified)));
+      const anonymous = env.unauthenticatedContext();
+      await assertFails(getDoc(doc(anonymous.firestore(), 'recall_users', OWNER_UID, 'sets', 'set-1')));
+    });
+
+    it('does not allow hard deletes of set documents', async () => {
+      const context = authorizedContext(env);
+      await assertSucceeds(setDoc(setDocRef(context), validSet()));
+      await assertFails(deleteDoc(setDocRef(context)));
+    });
   });
 
-  it('permits only current singleton ids and strongly shaped singleton data', async () => {
-    const firestore = authorizedContext(environment).firestore();
-    await assertFails(setDoc(doc(firestore, 'research_users', OWNER_UID, 'profile', 'extra'), validProfile()));
-    await assertFails(setDoc(doc(firestore, 'research_users', OWNER_UID, 'profile', 'current'), {
-      ...validProfile(), email: 'someone@example.com',
-    }));
-    await assertFails(setDoc(doc(firestore, 'research_users', OWNER_UID, 'settings', 'current'), {
-      ...validSettings(), readerWidth: 'enormous',
-    }));
-    await assertFails(setDoc(doc(firestore, 'research_users', OWNER_UID, 'settings', 'current'), {
-      ...validSettings(), rawPdf: 'JVBERi0=',
-    }));
-    const profile = doc(firestore, 'research_users', OWNER_UID, 'profile', 'current');
-    await assertSucceeds(setDoc(profile, { ...validProfile(), updatedAt: LATER }));
-    await assertFails(setDoc(profile, validProfile()));
-  });
+  describe('progress', () => {
+    it('lets the owner create, update, and delete progress', async () => {
+      const context = authorizedContext(env);
+      await assertSucceeds(setDoc(progressDocRef(context), validProgress()));
+      await assertSucceeds(setDoc(progressDocRef(context), validProgress({ updatedAt: 2000, bestMatchMs: 8000 })));
+      await assertSucceeds(deleteDoc(progressDocRef(context)));
+    });
 
-  it('rejects mismatched ids, raw PDF bytes, oversize metadata, and unknown entity fields', async () => {
-    const firestore = authorizedContext(environment).firestore();
-    const reference = doc(firestore, 'research_users', OWNER_UID, 'papers', 'paper-1');
-    await assertFails(setDoc(reference, validPaper({ id: 'different' })));
-    await assertFails(setDoc(reference, validPaper({ pdfBytes: [37, 80, 68, 70] })));
-    await assertFails(setDoc(reference, validPaper({
-      file: { ...validPaper().file as object, sizeBytes: 50 * 1024 * 1024 + 1 },
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      file: { ...validPaper().file as object, sha256: 'not-a-content-hash' },
-    })));
-    await assertFails(setDoc(doc(firestore, 'research_users', OWNER_UID, 'notes', 'note-1'), {
-      ...validNote(), privateBlob: 'nope',
-    }));
-    await assertFails(setDoc(doc(firestore, 'research_users', OWNER_UID, 'messages', 'message-1'), {
-      ...validMessage(), context: { tab: 'reader' },
-    }));
-  });
+    it('rejects updatedAt regressions, id mismatches, and bad shapes', async () => {
+      const context = authorizedContext(env);
+      await assertSucceeds(setDoc(progressDocRef(context), validProgress({ updatedAt: 5000 })));
+      await assertFails(setDoc(progressDocRef(context), validProgress({ updatedAt: 4000 })));
+      await assertFails(setDoc(progressDocRef(context), validProgress({ setId: 'other', updatedAt: 6000 })));
+      await assertFails(setDoc(progressDocRef(context), validProgress({ updatedAt: 6000, bestMatchMs: 0 })));
+      await assertFails(setDoc(progressDocRef(context), validProgress({ updatedAt: 6000, extra: true })));
+    });
 
-  it('allows only the exact optional structured analysis lease', async () => {
-    const firestore = authorizedContext(environment).firestore();
-    const reference = doc(firestore, 'research_users', OWNER_UID, 'papers', 'paper-1');
-
-    await assertSucceeds(setDoc(reference, validPaper({ analysisLease: validAnalysisLease() })));
-    await assertSucceeds(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisUpdatedAt: LATER,
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisLease: validAnalysisLease({ mode: 'remote' }),
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisLease: validAnalysisLease({ unexpected: true }),
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisLease: validAnalysisLease({ runId: 'invalid run id' }),
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisLease: { runId: 'analysis-run-1', ownerId: 'research-tab-1', mode: 'local' },
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisLease: validAnalysisLease({ heartbeatAt: 'not-a-date' }),
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisLease: validAnalysisLease({ heartbeatAt: '2026-99-99T99:99:99.999Z' }),
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisUpdatedAt: FINAL,
-      analysisRunId: 'invalid run id',
-    })));
-  });
-
-  it('protects active analysis state while allowing concurrent metadata edits', async () => {
-    const firestore = authorizedContext(environment).firestore();
-    const reference = doc(firestore, 'research_users', OWNER_UID, 'papers', 'paper-1');
-    const activeAnalysis = {
-      analysisStatus: 'analyzing',
-      analysisProgress: 20,
-      analysisUpdatedAt: STAMP,
-      analysisRunId: 'analysis-run-1',
-      analysisLease: validAnalysisLease(),
-    };
-
-    await assertSucceeds(setDoc(reference, validPaper(activeAnalysis)));
-    await assertFails(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      title: 'Stale tab edit without the active generation',
-    })));
-    await assertSucceeds(setDoc(reference, validPaper({
-      ...activeAnalysis,
-      updatedAt: LATER,
-      title: 'Metadata edit preserving the active generation',
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      ...activeAnalysis,
-      updatedAt: FINAL,
-      analysisProgress: 21,
-    })));
-    await assertSucceeds(setDoc(reference, validPaper({
-      updatedAt: LATER,
-      analysisStatus: 'local',
-      analysisUpdatedAt: FINAL,
-      analysisRunId: 'analysis-run-1',
-    })));
-    await assertFails(setDoc(reference, validPaper({
-      ...activeAnalysis,
-      updatedAt: FINAL,
-      analysisUpdatedAt: LATER,
-    })));
-  });
-
-  it('enforces durable tombstones, immutable creation times, monotonic updates, and no hard deletes', async () => {
-    const firestore = authorizedContext(environment).firestore();
-    const reference = doc(firestore, 'research_users', OWNER_UID, 'papers', 'paper-1');
-    await assertSucceeds(setDoc(reference, validPaper()));
-    await assertFails(setDoc(reference, validPaper({ updatedAt: '2026-07-13T09:00:00.000Z' })));
-    await assertFails(setDoc(reference, validPaper({ createdAt: LATER, updatedAt: LATER })));
-    await assertFails(setDoc(reference, validPaper({ updatedAt: LATER, deleted: true })));
-    await assertSucceeds(setDoc(reference, validPaper({ updatedAt: LATER, deleted: true, deletedAt: LATER })));
-    await assertFails(setDoc(reference, validPaper({ updatedAt: '2026-07-13T12:00:00.000Z' })));
-    await assertFails(deleteDoc(reference));
-  });
-
-  it('rejects other accounts, wrong owners, unverified users, other providers, and anonymous access', async () => {
-    const path = ['research_users', OWNER_UID, 'papers', 'paper-1'] as const;
-    await assertFails(getDoc(doc(authorizedContext(environment, OWNER_UID, { email: 'other@example.com' }).firestore(), ...path)));
-    await assertFails(getDoc(doc(authorizedContext(environment, 'other-owner').firestore(), ...path)));
-    await assertFails(getDoc(doc(authorizedContext(environment, OWNER_UID, { email_verified: false }).firestore(), ...path)));
-    await assertFails(getDoc(doc(authorizedContext(environment, OWNER_UID, {
-      firebase: { sign_in_provider: 'password' },
-    }).firestore(), ...path)));
-    await assertFails(getDoc(doc(environment.unauthenticatedContext().firestore(), ...path)));
-  });
-
-  it('exposes neither a Sift root document nor unknown subcollections', async () => {
-    const firestore = authorizedContext(environment).firestore();
-    await assertFails(getDoc(doc(firestore, 'research_users', OWNER_UID)));
-    await assertFails(setDoc(doc(firestore, 'research_users', OWNER_UID, 'uploads', 'secret'), {
-      openaiKey: 'forbidden',
-    }));
-  });
-
-  it('preserves authorized Daymark, Slate, and Fare access in the shared ruleset', async () => {
-    const firestore = authorizedContext(environment).firestore();
-    await assertSucceeds(setDoc(doc(firestore, 'daymark_users', OWNER_UID), {
-      generationId: 'generation-1', profileGenerationId: 'generation-1',
-    }));
-    await assertSucceeds(setDoc(doc(firestore, 'daymark_users', OWNER_UID, 'habits', 'read'), { name: 'Read' }));
-    await assertSucceeds(setDoc(doc(firestore, 'slate_users', OWNER_UID), { schemaVersion: 1 }));
-    await assertSucceeds(setDoc(doc(firestore, 'slate_users', OWNER_UID, 'tasks', 'task-1'), { id: 'task-1' }));
-    await assertSucceeds(setDoc(doc(firestore, 'fare_users', OWNER_UID, 'profile', 'current'), { updatedAt: STAMP }));
-    await assertSucceeds(setDoc(doc(firestore, 'fare_users', OWNER_UID, 'foods', 'food-1'), {
-      id: 'food-1', updatedAt: STAMP,
-    }));
+    it('denies access for other uids', async () => {
+      const owner = authorizedContext(env);
+      await assertSucceeds(setDoc(progressDocRef(owner), validProgress()));
+      const other = authorizedContext(env, 'someone-else');
+      await assertFails(getDoc(progressDocRef(other, OWNER_UID)));
+      await assertFails(setDoc(progressDocRef(other, OWNER_UID), validProgress({ updatedAt: 9000 })));
+    });
   });
 });
