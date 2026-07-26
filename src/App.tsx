@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { GraduationCap, Monitor, Moon, Sun } from 'lucide-react';
-import type { AppData, Mode, StudyMaterial, StudySet, Theme } from './model';
+import type { AppData, Mode, StudyMaterial, StudySet, SyncStatus, Theme } from './model';
 import { MODES } from './model';
+import type { CloudEngine } from './lib/cloud';
 import { extractStudyMaterial } from './lib/extract';
 import { parseMarkdown } from './lib/markdown';
 import {
@@ -20,6 +21,26 @@ import {
 import { SAMPLE_MARKDOWN, SAMPLE_TITLE } from './lib/sample';
 import { Library, type ImportItem } from './components/Library';
 import { SetShell } from './components/SetShell';
+import { SyncMenu } from './components/SyncMenu';
+
+const SYNC_FLAG_KEY = 'recall.sync.on';
+
+function syncFlag(): boolean {
+  try {
+    return localStorage.getItem(SYNC_FLAG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setSyncFlag(on: boolean) {
+  try {
+    if (on) localStorage.setItem(SYNC_FLAG_KEY, '1');
+    else localStorage.removeItem(SYNC_FLAG_KEY);
+  } catch {
+    /* storage blocked */
+  }
+}
 
 type Route = { view: 'library' } | { view: 'set'; setId: string; mode: Mode };
 
@@ -40,6 +61,34 @@ export default function App() {
   const [data, setData] = useState<AppData>(() => loadData());
   const [route, setRoute] = useState<Route>(parseHash);
   const [notice, setNotice] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'off' });
+  const cloudRef = useRef<CloudEngine | null>(null);
+
+  const bootCloud = async (): Promise<CloudEngine> => {
+    const { startCloud } = await import('./lib/cloud');
+    const engine = startCloud({
+      onStatus: setSyncStatus,
+      onRemote: (fold) => setData((d) => fold(d)),
+    });
+    cloudRef.current = engine;
+    return engine;
+  };
+
+  useEffect(() => {
+    if (syncFlag()) void bootCloud();
+  }, []);
+
+  const enableSync = async () => {
+    setSyncFlag(true);
+    const engine = await bootCloud();
+    await engine.signIn();
+  };
+
+  const disableSync = async () => {
+    setSyncFlag(false);
+    setSyncStatus({ state: 'off' });
+    await cloudRef.current?.signOut();
+  };
 
   useEffect(() => {
     const onHash = () => setRoute(parseHash());
@@ -49,6 +98,7 @@ export default function App() {
 
   useEffect(() => {
     saveData(data);
+    cloudRef.current?.push(data);
   }, [data]);
 
   useEffect(() => {
@@ -123,8 +173,8 @@ export default function App() {
   };
 
   const removeSet = (set: StudySet) => {
-    if (!window.confirm(`Delete “${set.title}” and its progress? This cannot be undone.`)) return;
-    setData((d) => deleteSet(d, set.id));
+    if (!window.confirm(`Delete “${set.title}” and its progress? This also removes it from synced devices.`)) return;
+    setData((d) => deleteSet(d, set.id, Date.now()));
     if (route.view === 'set' && route.setId === set.id) navigate('/');
   };
 
@@ -143,7 +193,7 @@ export default function App() {
   };
 
   const starFor = (setId: string) => (cardId: string) => {
-    setData((d) => withProgress(d, setId, toggleStar(getProgress(d, setId), cardId)));
+    setData((d) => withProgress(d, setId, toggleStar(getProgress(d, setId), cardId, Date.now())));
   };
 
   const bestTimeFor = (setId: string) => (ms: number) => {
@@ -178,6 +228,7 @@ export default function App() {
             Recall
           </button>
           <div className="header-actions">
+            <SyncMenu status={syncStatus} onEnable={() => void enableSync()} onSignOut={() => void disableSync()} />
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -227,7 +278,8 @@ export default function App() {
       </main>
 
       <footer className="app-footer">
-        Notes stay in this browser — nothing is uploaded. Study sets are generated locally from your markdown.
+        Study sets are generated locally from your markdown. Turn on Sync to keep sets and progress on all your
+        devices; otherwise everything stays in this browser.
       </footer>
     </div>
   );

@@ -1,6 +1,6 @@
 # Architecture
 
-Recall is a fully client-side React + Vite single-page app. There is no backend, no accounts, and no network I/O at runtime; the deployed site is static files on GitHub Pages served under `/research/`.
+Recall is a client-side React + Vite single-page app; the deployed site is static files on GitHub Pages served under `/research/`. There is no app server. The only runtime network I/O is the optional Firebase sync (Google auth + Firestore), which stays completely unloaded until the user turns Sync on.
 
 ## Pipeline
 
@@ -23,6 +23,15 @@ Study material is always **derived** from the stored markdown at load time (memo
 - `src/lib/store.ts` — versioned `localStorage` persistence (`recall.data.v1`) for sets, per-card progress boxes, match best times, and theme preference. Works against an injectable storage so tests run in Node without a DOM.
 - `src/App.tsx` — hash router (`#/`, `#/set/<id>/<mode>`) so deep links work on GitHub Pages without a SPA fallback.
 - `public/sw.js` — cache-first app-shell service worker; its activate step also deletes caches left behind by the previous app that lived at this scope.
+
+## Sync
+
+Sync is optional and lazy: `src/lib/cloud.ts` (and the Firebase SDK with it) is `import()`ed only when the user enables Sync or has it enabled from a previous session (`recall.sync.on` flag).
+
+- `src/firebase.ts` — shared-project Firebase init (named app, persistent Firestore cache, Google provider). The web config is public by design; access control lives in the rules.
+- `src/lib/sync-core.ts` — pure, unit-tested merge logic. Sets replicate to `recall_users/{uid}/sets/{setId}` and progress to `recall_users/{uid}/progress/{setId}`. Deletions write tombstones (`deleted`, `deletedAt`) so they propagate; live docs win by `updatedAt` (last writer wins), per-card progress wins by `last` touch, and match best-times keep the minimum. `planPush` diffs local state against the last-known remote index so only strictly-newer docs are written.
+- `src/lib/cloud.ts` — Firestore adapter: snapshot listeners fold remote changes into app state, local changes push through a debounced diff, and auth uses popup sign-in with a redirect fallback for installed PWAs. Permission errors surface a "deploy the rules" message rather than failing silently.
+- `firestore.rules` — the complete ruleset for every app in the shared Firebase project; Recall's block validates doc shapes, enforces the owner-only Google account, keeps `createdAt` immutable, and requires monotonic `updatedAt`. Covered by `tests/firestore.rules.test.ts` against the emulator (`npm run test:rules`).
 
 ## Testing
 

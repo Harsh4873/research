@@ -139,7 +139,17 @@ export interface AppData {
   version: 1;
   sets: StudySet[];
   progress: Record<string, SetProgress>;
+  /** Deleted set ids → deletion time, so deletions propagate through sync. */
+  tombstones: Record<string, number>;
   theme: Theme;
+}
+
+export type SyncState = 'off' | 'connecting' | 'syncing' | 'synced' | 'error';
+
+export interface SyncStatus {
+  state: SyncState;
+  email?: string;
+  error?: string;
 }
 
 export const MODES = ['notes', 'cards', 'quiz', 'blanks', 'match'] as const;

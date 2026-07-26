@@ -69,12 +69,13 @@ describe('mastery ladder', () => {
     expect(masteryPercent(progress, [])).toBe(0);
   });
 
-  it('toggles stars without touching stats', () => {
+  it('toggles stars without touching answer stats, stamping last-touched', () => {
     let progress = getProgress(defaultData(), 'set');
-    progress = toggleStar(progress, 'x');
+    progress = toggleStar(progress, 'x', 7);
     expect(progress.cards.x.starred).toBe(true);
     expect(progress.cards.x.seen).toBe(0);
-    progress = toggleStar(progress, 'x');
+    expect(progress.cards.x.last).toBe(7);
+    progress = toggleStar(progress, 'x', 8);
     expect(progress.cards.x.starred).toBe(false);
   });
 });
@@ -95,9 +96,10 @@ describe('set management and export', () => {
     expect(() => parseSetExport('{"format":"other"}')).toThrow();
 
     data = withProgress(data, set.id, recordAnswer(getProgress(data, set.id), 'c', true, 6));
-    data = deleteSet(data, set.id);
+    data = deleteSet(data, set.id, 7);
     expect(data.sets).toHaveLength(0);
     expect(data.progress[set.id]).toBeUndefined();
+    expect(data.tombstones[set.id]).toBe(7);
   });
 
   it('generates distinct ids for different content and times', () => {

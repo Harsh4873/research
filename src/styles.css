@@ -398,6 +398,74 @@ button {
   margin-top: 18px;
 }
 
+/* ---------- Sync ---------- */
+
+.sync-wrap {
+  position: relative;
+}
+
+.sync-ok {
+  color: var(--green);
+}
+
+.sync-bad {
+  color: var(--red);
+}
+
+.sync-busy {
+  color: var(--accent);
+  animation: sync-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes sync-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.sync-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: min(300px, 86vw);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  padding: 14px;
+}
+
+.sync-email {
+  font-weight: 700;
+  font-size: 13.5px;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.sync-note {
+  color: var(--text-soft);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.sync-error {
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+.sync-pop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* ---------- Library ---------- */
 
 .hero {

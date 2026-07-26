@@ -31,7 +31,7 @@ export function defaultStorage(): StorageLike {
 }
 
 export function defaultData(): AppData {
-  return { version: 1, sets: [], progress: {}, theme: 'auto' };
+  return { version: 1, sets: [], progress: {}, tombstones: {}, theme: 'auto' };
 }
 
 function isTheme(v: unknown): v is Theme {
@@ -91,6 +91,11 @@ function sanitize(raw: unknown): AppData {
       data.progress[setId] = progress;
     }
   }
+  if (typeof r.tombstones === 'object' && r.tombstones !== null) {
+    for (const [setId, at] of Object.entries(r.tombstones as Record<string, unknown>)) {
+      if (typeof at === 'number' && at > 0) data.tombstones[setId] = at;
+    }
+  }
   if (isTheme(r.theme)) data.theme = r.theme;
   return data;
 }
@@ -126,10 +131,15 @@ export function upsertSet(data: AppData, set: StudySet): AppData {
   };
 }
 
-export function deleteSet(data: AppData, setId: string): AppData {
+export function deleteSet(data: AppData, setId: string, now: number): AppData {
   const progress = { ...data.progress };
   delete progress[setId];
-  return { ...data, sets: data.sets.filter((s) => s.id !== setId), progress };
+  return {
+    ...data,
+    sets: data.sets.filter((s) => s.id !== setId),
+    progress,
+    tombstones: { ...data.tombstones, [setId]: now },
+  };
 }
 
 export function getProgress(data: AppData, setId: string): SetProgress {
@@ -163,9 +173,9 @@ export function recordAnswer(progress: SetProgress, cardId: string, correct: boo
   };
 }
 
-export function toggleStar(progress: SetProgress, cardId: string): SetProgress {
+export function toggleStar(progress: SetProgress, cardId: string, now: number): SetProgress {
   const card = progress.cards[cardId] ?? emptyCardProgress();
-  return { ...progress, cards: { ...progress.cards, [cardId]: { ...card, starred: !card.starred } } };
+  return { ...progress, cards: { ...progress.cards, [cardId]: { ...card, starred: !card.starred, last: now } } };
 }
 
 /** Average mastery of the given cards, 0–100. */
