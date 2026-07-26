@@ -7,7 +7,7 @@ Recall is a client-side React + Vite single-page app; the deployed site is stati
 ```
 markdown text
   → lib/markdown.ts   parse to a block model (headings, paragraphs, lists, tables, quotes, code)
-  → lib/extract.ts    derive study material: term/definition cards, cloze sentences, section outline, stats
+  → lib/extract.ts    derive explicit concepts, section recall cards, contextual clozes, outline, stats
   → lib/questions.ts  build multiple-choice quizzes and match rounds (seeded RNG, word-overlap distractors)
   → components/*      study modes render the derived material
 ```
@@ -17,7 +17,9 @@ Study material is always **derived** from the stored markdown at load time (memo
 ## Modules
 
 - `src/lib/markdown.ts` — small deterministic Markdown parser producing typed blocks with inline runs (bold, italic, code, links). ATX headings only; front matter is skipped (a `title:` is honored).
-- `src/lib/extract.ts` — heuristics that turn blocks into cards: bold-term bullets (`**Term** — definition`), plain `Term: definition` bullets, two-plus-column tables, `Q:`/`A:` pairs, and cloze sentences built by blanking a bold phrase or a known term inside prose sentences. Cards get stable content-hash ids so progress survives re-parsing.
+- `src/lib/extract.ts` — deterministic semantic heuristics that turn blocks into cards: bold definition sentences, bold-term bullets (`**Term** — definition`), plain `Term: definition` bullets, two-plus-column tables, `Q:`/`A:` pairs, and section recall questions backed by the section's opening explanation. Cloze sentences blank bounded concepts rather than arbitrary emphasized words, with generic status words and oversized claims filtered out. Cards get stable content-hash ids so progress survives re-parsing.
+- `src/lib/bundled.ts` and `src/content/` — seven privacy-scrubbed research documents installed as ordinary sets. Content hashing prevents duplicate imports, and deletion tombstones stop removed bundled sets from returning.
+- `src/lib/speech.ts` — optional browser-native speech recognition for the Notes composer. Audio is not stored by Recall; support and speech processing depend on the browser.
 - `src/lib/questions.ts` — quiz builder (term→definition, definition→term, and cloze multiple choice) with distractors preferred by word overlap, plus match-round sampling. Uses a seeded mulberry32 PRNG so tests are deterministic.
 - `src/lib/answer.ts` — typed-answer checking: Unicode/diacritic normalization, punctuation and leading-article stripping, and length-scaled Levenshtein tolerance.
 - `src/lib/store.ts` — versioned `localStorage` persistence (`recall.data.v1`) for sets, per-card progress boxes, match best times, and theme preference. Works against an injectable storage so tests run in Node without a DOM.

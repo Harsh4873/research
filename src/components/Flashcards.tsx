@@ -115,6 +115,9 @@ export function Flashcards({ material, progress, onAnswer, onToggleStar }: Flash
   }
 
   const starred = card ? progress.cards[card.id]?.starred === true : false;
+  const questionCard = card?.source === 'section';
+  const frontLabel = termFirst ? (questionCard ? 'Question' : 'Term') : (questionCard ? 'Answer' : 'Definition');
+  const backLabel = termFirst ? (questionCard ? 'Answer' : 'Definition') : (questionCard ? 'Question' : 'Term');
 
   return (
     <div className="flashcards fade-in">
@@ -133,7 +136,7 @@ export function Flashcards({ material, progress, onAnswer, onToggleStar }: Flash
         </div>
         <div className="toolbar-group">
           <button type="button" className="chip" onClick={() => { setTermFirst((v) => !v); setFlipped(false); }}>
-            Front: {termFirst ? 'term' : 'definition'}
+            Front: {termFirst ? 'prompt' : 'answer'}
           </button>
           <button
             type="button"
@@ -159,12 +162,12 @@ export function Flashcards({ material, progress, onAnswer, onToggleStar }: Flash
         <button type="button" className={`flashcard ${flipped ? 'is-flipped' : ''}`} onClick={() => setFlipped((f) => !f)}>
           <span className="flashcard-inner">
             <span className="flashcard-face flashcard-front">
-              <span className="face-label">{termFirst ? 'Term' : 'Definition'}</span>
+              <span className="face-label">{frontLabel}</span>
               <span className="face-text">{termFirst ? card.term : card.definition}</span>
               <span className="face-hint">Tap or press space to flip</span>
             </span>
             <span className="flashcard-face flashcard-back">
-              <span className="face-label">{termFirst ? 'Definition' : 'Term'}</span>
+              <span className="face-label">{backLabel}</span>
               <span className="face-text">{termFirst ? card.definition : card.term}</span>
               <span className="face-section">{card.section}</span>
             </span>

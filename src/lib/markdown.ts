@@ -8,6 +8,13 @@ const QUOTE_RE = /^ {0,3}>\s?(.*)$/;
 const TABLE_SEP_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/;
 const ESCAPABLE = '\\`*_{}[]()#+-.!|>~';
 
+function emphasisText(source: string): string {
+  return source
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\*\*|__|`/g, '');
+}
+
 function expandTabs(s: string): string {
   return s.replace(/\t/g, '  ');
 }
@@ -57,7 +64,7 @@ export function parseInlines(src: string): Inline[] {
       const end = src.indexOf(mark, i + 2);
       if (end > i + 2) {
         flush();
-        out.push({ kind: 'bold', text: src.slice(i + 2, end).replace(/\*\*|__/g, '') });
+        out.push({ kind: 'bold', text: emphasisText(src.slice(i + 2, end)) });
         i = end + 2;
         continue;
       }

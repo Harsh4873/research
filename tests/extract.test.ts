@@ -6,7 +6,7 @@ describe('term extraction', () => {
   it('harvests bold-term bullets with ":" and "—" separators', () => {
     const md = '## Cells\n\n- **Mitochondria**: the powerhouse of the cell\n- **Ribosome** — builds proteins from RNA instructions\n';
     const { terms } = extractStudyMaterial(md);
-    expect(terms.map((t) => t.term)).toEqual(['Mitochondria', 'Ribosome']);
+    expect(terms.slice(0, 2).map((t) => t.term)).toEqual(['Mitochondria', 'Ribosome']);
     expect(terms[0].definition).toBe('the powerhouse of the cell');
     expect(terms[1].definition).toBe('builds proteins from RNA instructions');
     expect(terms[0].section).toBe('Cells');
@@ -68,6 +68,16 @@ describe('term extraction', () => {
     expect(terms).toHaveLength(1);
     expect(terms[0].definition).toBe('the energy currency of the cell');
   });
+
+  it('builds a coherent section question from prose-heavy notes', () => {
+    const md = '## Why the cohorts are compared\n\nThe two cohorts are compared directly so the statistic isolates the diabetes-associated difference rather than general selection.\n';
+    const { terms } = extractStudyMaterial(md);
+    expect(terms).toContainEqual(expect.objectContaining({
+      term: 'Why are the cohorts compared?',
+      definition: expect.stringContaining('compared directly'),
+      source: 'section',
+    }));
+  });
 });
 
 describe('cloze extraction', () => {
@@ -92,6 +102,18 @@ describe('cloze extraction', () => {
   it('does not create clozes from tiny fragments', () => {
     const { clozes } = extractStudyMaterial('**Hi** there.\n');
     expect(clozes).toHaveLength(0);
+  });
+
+  it('rejects generic emphasized status words and overlong emphasized claims', () => {
+    const md = [
+      'The pipeline is **running** while the independent verification completes.',
+      '**All four candidate genes survived the expanded cohort test.** This is a strong falsification result.',
+      'The headline statistic is **DPD**, the probability that one cohort has higher omega.',
+    ].join('\n\n');
+    const { clozes } = extractStudyMaterial(md);
+    expect(clozes.some((card) => card.answer === 'running')).toBe(false);
+    expect(clozes.some((card) => card.answer.startsWith('All four'))).toBe(false);
+    expect(clozes.some((card) => card.answer === 'DPD')).toBe(true);
   });
 });
 

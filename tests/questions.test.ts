@@ -48,6 +48,15 @@ describe('buildQuiz', () => {
     for (const q of quiz) expect(allowed.has(q.cardId)).toBe(true);
   });
 
+  it('keeps section recall cards in question-to-answer form', () => {
+    const section = material.terms.find((card) => card.source === 'section');
+    expect(section).toBeDefined();
+    const quiz = buildQuiz(material.terms, material.clozes, { seed: 9, cardIds: new Set([section!.id]) });
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0].kind).toBe('term-to-def');
+    expect(quiz[0].prompt).toBe(section!.term);
+  });
+
   it('returns no term questions when there are fewer than four terms', () => {
     const few = material.terms.slice(0, 3);
     const quiz = buildQuiz(few, [], { seed: 1 });

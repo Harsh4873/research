@@ -29,6 +29,7 @@ interface SetShellProps {
   onToggleStar: (cardId: string) => void;
   onBestTime: (ms: number) => void;
   onSaveMarkdown: (markdown: string) => void;
+  onAddNote: (note: string) => void;
   onDelete: () => void;
   onExport: () => void;
 }
@@ -73,7 +74,7 @@ export function SetShell(props: SetShellProps) {
             <button type="button" className="icon-btn" title="Export as JSON" aria-label="Export as JSON" onClick={props.onExport}>
               <Download size={16} aria-hidden />
             </button>
-            <button type="button" className="icon-btn icon-btn-danger" title="Delete set" aria-label="Delete set" onClick={props.onDelete}>
+            <button type="button" className="icon-btn icon-btn-danger" title="Remove set" aria-label="Remove set" onClick={props.onDelete}>
               <Trash2 size={16} aria-hidden />
             </button>
           </div>
@@ -121,7 +122,7 @@ export function SetShell(props: SetShellProps) {
       </nav>
 
       <div className="mode-panel">
-        {mode === 'notes' && <NotesView material={material} />}
+        {mode === 'notes' && <NotesView material={material} onAddNote={props.onAddNote} />}
         {mode === 'cards' && (
           <Flashcards material={material} progress={progress} onAnswer={props.onAnswer} onToggleStar={props.onToggleStar} />
         )}

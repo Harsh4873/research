@@ -77,7 +77,10 @@ export function buildQuiz(terms: TermCard[], clozes: ClozeCard[], opts: QuizOpti
 
   if (terms.length >= 4) {
     pickedTerms.forEach((card, index) => {
-      const askForTerm = index % 2 === 0;
+      // Section cards are already written as question → answer prompts. Asking
+      // learners to infer a question from a paragraph produces unnatural quiz
+      // items, so those cards always keep the question on the front.
+      const askForTerm = card.source !== 'section' && index % 2 === 0;
       if (askForTerm) {
         const options = pickDistractors(terms.map((t) => t.term), card.term, 3, rng);
         if (options.length < 2) return;

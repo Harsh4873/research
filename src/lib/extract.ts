@@ -14,9 +14,18 @@ import { parseMarkdown, plainText } from './markdown';
 export const BLANK = '____';
 
 const MAX_CLOZES = 60;
+const MAX_TERMS = 140;
+const MAX_SECTION_CARDS = 24;
 const SEPARATOR_RE = /^\s*(?:[:：]|[—–―]|::|[-=]{1,2})\s*/;
+const DEFINITION_CONNECTOR_RE = /^\s*(?:is|are|means?|refers? to|describes?|represents?|equals?|=)\s+/i;
+const IMPLICIT_DEFINITION_RE = /^\s*(?:an?\s+|the\s+|how\s+|whether\s+|probability\b|ratio\b)/i;
 const QUESTION_RE = /^(?:q|question)\s*(?:\d+)?\s*[:.)\-–—]\s*(.+)$/i;
 const ANSWER_RE = /^(?:a|answer)\s*(?:\d+)?\s*[:.)\-–—]\s*(.+)$/i;
+const GENERIC_CLOZE_TARGETS = new Set([
+  'done', 'state', 'status', 'update', 'updated', 'current', 'currently', 'important',
+  'note', 'result', 'results', 'yes', 'no', 'true', 'false', 'running', 'finished',
+  'gene', 'genes', 'slowest', 'estimate', 'estimates', 'estimated', 'fix', 'fixes', 'fixed',
+]);
 
 export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -93,8 +102,12 @@ function termFromBoldStart(unit: Unit): { term: string; definition: string } | n
     definition = definition.replace(/^\s*[—–\-]\s*/, '').trim();
   } else {
     const m = definition.match(SEPARATOR_RE);
-    if (!m) return null;
-    definition = definition.slice(m[0].length).trim();
+    if (m) definition = definition.slice(m[0].length).trim();
+    else {
+      const connector = definition.match(DEFINITION_CONNECTOR_RE);
+      if (connector) definition = definition.slice(connector[0].length).trim();
+      else if (!IMPLICIT_DEFINITION_RE.test(definition)) return null;
+    }
   }
   if (!isReasonableTerm(term) || definition.length < 4) return null;
   return { term, definition };
@@ -102,6 +115,7 @@ function termFromBoldStart(unit: Unit): { term: string; definition: string } | n
 
 function termFromColonLine(unit: Unit): { term: string; definition: string } | null {
   if (unit.inlines[0]?.kind === 'bold') return null; // handled by the bold rule
+  if (unit.inlines[0]?.kind === 'link') return null; // usually a linked table of contents entry
   if (!unit.isItem && unit.text.length > 120) return null;
   const idx = unit.text.indexOf(': ');
   if (idx <= 0) return null;
@@ -115,9 +129,77 @@ function termFromColonLine(unit: Unit): { term: string; definition: string } | n
 
 function sentencesOf(text: string): string[] {
   return text
-    .split(/(?<=[.!?])\s+(?=["'(A-Z0-9])/)
+    .split(/(?<=[.!?])\s+(?=\S)/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function concise(text: string, maximum = 420): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= maximum) return clean;
+  const clipped = clean.slice(0, maximum + 1);
+  const sentenceEnd = Math.max(clipped.lastIndexOf('. '), clipped.lastIndexOf('? '), clipped.lastIndexOf('! '));
+  const wordEnd = clipped.lastIndexOf(' ');
+  const end = sentenceEnd >= Math.floor(maximum * 0.55) ? sentenceEnd + 1 : wordEnd;
+  return `${clipped.slice(0, Math.max(1, end)).trim()}…`;
+}
+
+function questionFromHeading(heading: string): string {
+  const clean = heading.replace(/^\d+(?:\.\d+)*[.)]?\s*/, '').trim();
+  if (/[?？]/.test(clean)) return clean;
+  const inverted = clean.match(/^(why|how)\s+(.+?)\s+(is|are|was|were|can|could|should|would|does|do|did)\s+(.+)$/i);
+  if (inverted) return `${inverted[1]} ${inverted[3]} ${inverted[2]} ${inverted[4]}?`;
+  if (/^why\s+a\s+posterior\s+and\s+not\s+a\s+point\s+estimate$/i.test(clean)) return 'Why use a posterior rather than a point estimate?';
+  if (/^why\s+the\s+two\s+agree$/i.test(clean)) return 'Why do the two methods agree?';
+  if (/^how\s+(?:these|those)\b/i.test(clean)) return clean.replace(/^how\s+/i, 'How do ') + '?';
+  if (/^what\s+it\s+is$/i.test(clean)) return 'What is it?';
+  if (/^what\s+it\s+produces$/i.test(clean)) return 'What does it produce?';
+  if (/^(?:why|how|what|when|where|which|who|can|does|do|is|are|should|could|would)\b/i.test(clean)) return `${clean}?`;
+  if (/^the question$/i.test(clean)) return 'What question is this analysis trying to answer?';
+  return `What is the key idea in “${clean}”?`;
+}
+
+function firstSectionAnswer(blocks: Block[], headingIndex: number, depth: number): string | undefined {
+  const pieces: string[] = [];
+  for (let index = headingIndex + 1; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (block.type === 'heading' && block.depth <= depth) break;
+    if (block.type === 'para' && block.text.length >= 28) pieces.push(block.text);
+    else if (block.type === 'list' && pieces.length === 0) {
+      pieces.push(...block.items.slice(0, 3).map((item) => item.text));
+    } else if (block.type === 'quote' && pieces.length === 0) {
+      const nested = block.blocks.find((item) => item.type === 'para');
+      if (nested?.type === 'para') pieces.push(nested.text);
+    }
+    if (pieces.join(' ').length >= 180) break;
+  }
+  const answer = concise(pieces.join(' '));
+  return answer.length >= 35 ? answer : undefined;
+}
+
+function sectionCards(doc: ParsedDoc): Array<{ term: string; definition: string; section: string }> {
+  const cards: Array<{ term: string; definition: string; section: string }> = [];
+  for (let index = 0; index < doc.blocks.length && cards.length < MAX_SECTION_CARDS; index += 1) {
+    const block = doc.blocks[index];
+    if (block.type !== 'heading' || block.depth < 2 || block.depth > 3) continue;
+    const heading = block.text.replace(/^\d+(?:\.\d+)*[.)]?\s*/, '').trim();
+    if (!heading || /^(?:contents?|glossary|references?)$/i.test(heading)) continue;
+    const definition = firstSectionAnswer(doc.blocks, index, block.depth);
+    if (!definition) continue;
+    cards.push({ term: questionFromHeading(heading), definition, section: heading });
+  }
+  return cards;
+}
+
+function usefulClozeTarget(target: string, sentence: string): boolean {
+  const clean = target.replace(/\s+/g, ' ').trim();
+  const key = normalizeKey(clean);
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (!key || GENERIC_CLOZE_TARGETS.has(key)) return false;
+  if (words.length > 8 || clean.length > 72 || /[.!?;:]$/.test(clean)) return false;
+  if (clean.length > sentence.length * 0.48) return false;
+  if (words.length === 1 && clean.length < 5 && !/[A-Z0-9ωχκ]/.test(clean)) return false;
+  return true;
 }
 
 /** Derive all study material from a markdown source. */
@@ -131,9 +213,11 @@ export function extractStudyMaterial(markdown: string): StudyMaterial {
   const seenTerms = new Map<string, number>();
 
   const addTerm = (term: string, definition: string, section: string, source: TermSource) => {
+    if (terms.length >= MAX_TERMS) return;
     const key = normalizeKey(term);
     if (!key) return;
-    const cleanDef = definition.replace(/\s+/g, ' ').trim();
+    const cleanDef = concise(definition);
+    if (cleanDef.length < 4) return;
     const existing = seenTerms.get(key);
     if (existing !== undefined) {
       if (cleanDef.length > terms[existing].definition.length) {
@@ -206,12 +290,18 @@ export function extractStudyMaterial(markdown: string): StudyMaterial {
     }
   }
 
-  // 3) Cloze cards. Prose sentences first (blank a bold phrase or a known term),
+  // 3) Section-level recall prompts make prose-heavy documents studyable even
+  //    when the author did not write every concept as “Term: definition”.
+  for (const card of sectionCards(doc)) {
+    addTerm(card.term, card.definition, card.section, 'section');
+  }
+
+  // 4) Cloze cards. Prose sentences first (blank a meaningful bold concept or a known term),
   //    then definition lines with the term blanked out.
   const clozes: ClozeCard[] = [];
   const seenClozes = new Set<string>();
   const termMatchers = terms
-    .filter((t) => t.term.length >= 3)
+    .filter((t) => t.source !== 'section' && t.term.length >= 3 && !/[?？]$/.test(t.term))
     .map((t) => ({ term: t.term, re: new RegExp(`\\b${escapeRegExp(t.term)}\\b`, 'i') }))
     .sort((a, b) => b.term.length - a.term.length);
 
@@ -236,14 +326,14 @@ export function extractStudyMaterial(markdown: string): StudyMaterial {
     const boldSpans = unit.inlines.filter((r) => r.kind === 'bold').map((r) => r.text.trim());
     for (const sentence of sentencesOf(unit.text)) {
       const bold = boldSpans
-        .filter((span) => span && sentence.toLowerCase().includes(span.toLowerCase()))
+        .filter((span) => span && sentence.toLowerCase().includes(span.toLowerCase()) && usefulClozeTarget(span, sentence))
         .sort((a, b) => b.length - a.length)[0];
       if (bold && bold.length < sentence.length * 0.8) {
         addCloze(sentence, bold, unit.section);
         continue;
       }
       const known = termMatchers.find((t) => t.re.test(sentence));
-      if (known && known.term.length < sentence.length * 0.8) {
+      if (known && known.term.length < sentence.length * 0.8 && usefulClozeTarget(known.term, sentence)) {
         addCloze(sentence, known.term, unit.section);
       }
     }
@@ -251,7 +341,13 @@ export function extractStudyMaterial(markdown: string): StudyMaterial {
 
   for (const card of terms) {
     if (clozes.length >= MAX_CLOZES) break;
-    if (card.definition.length < 12) continue;
+    if (
+      card.source === 'section'
+      || card.definition.length < 12
+      || /[?？]$/.test(card.term)
+      || /^(?:update|note|caveat)\b/i.test(card.term)
+      || !usefulClozeTarget(card.term, `${card.term} — ${card.definition}`)
+    ) continue;
     const def = card.definition.replace(new RegExp(`\\b${escapeRegExp(card.term)}\\b`, 'gi'), BLANK);
     const prompt = `${BLANK} — ${def}`;
     const key = normalizeKey(prompt);
@@ -260,7 +356,7 @@ export function extractStudyMaterial(markdown: string): StudyMaterial {
     clozes.push({ id: hashId(`cloze|${key}|${normalizeKey(card.term)}`), prompt, answer: card.term, section: card.section });
   }
 
-  // 4) Outline and stats.
+  // 5) Outline and stats.
   const outline: OutlineNode[] = [];
   for (const block of doc.blocks) {
     if (block.type === 'heading' && block.depth <= 3) {

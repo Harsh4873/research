@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
-import { BookOpen, Clock, Hash, Layers } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { BookOpen, Clock, Hash, Layers, Mic, MicOff, Plus } from 'lucide-react';
 import type { Block, ListBlock, StudyMaterial } from '../model';
 import { normalizeKey } from '../lib/extract';
+import { useSpeechInput } from '../lib/speech';
 import { InlineRuns } from './Inline';
 
-export function NotesView({ material }: { material: StudyMaterial }) {
+export function NotesView({ material, onAddNote }: { material: StudyMaterial; onAddNote: (note: string) => void }) {
   const termKeys = useMemo(() => new Set(material.terms.map((t) => normalizeKey(t.term))), [material]);
   const { stats, outline } = material;
 
@@ -28,6 +29,8 @@ export function NotesView({ material }: { material: StudyMaterial }) {
       )}
 
       <div className="notes-main">
+        <NoteComposer onAdd={onAddNote} />
+
         <div className="stat-chips">
           <span className="meta-chip">
             <Clock size={14} aria-hidden /> {stats.readingMinutes} min read
@@ -64,6 +67,57 @@ export function NotesView({ material }: { material: StudyMaterial }) {
         )}
       </div>
     </div>
+  );
+}
+
+function NoteComposer({ onAdd }: { onAdd: (note: string) => void }) {
+  const [body, setBody] = useState('');
+  const speech = useSpeechInput(body, setBody);
+
+  const submit = () => {
+    if (!body.trim()) return;
+    speech.stop();
+    onAdd(body.trim());
+    setBody('');
+  };
+
+  return (
+    <section className={`note-composer ${speech.listening ? 'is-listening' : ''}`} aria-label="Add a note">
+      <div className="note-composer-heading">
+        <div>
+          <strong>Add to these notes</strong>
+          <span>Type an idea, question, or summary—or dictate it.</span>
+        </div>
+        {speech.supported && (
+          <button
+            type="button"
+            className={`btn btn-sm ${speech.listening ? 'btn-danger' : 'btn-ghost'}`}
+            onClick={speech.listening ? speech.stop : speech.start}
+            aria-pressed={speech.listening}
+          >
+            {speech.listening ? <MicOff size={15} aria-hidden /> : <Mic size={15} aria-hidden />}
+            {speech.listening ? 'Stop dictation' : 'Dictate'}
+          </button>
+        )}
+      </div>
+      <textarea
+        className="textarea"
+        rows={4}
+        value={body}
+        onChange={(event) => setBody(event.target.value)}
+        readOnly={speech.listening}
+        placeholder="Capture a connection, question, or explanation…"
+        aria-label="New note"
+      />
+      <div className="note-composer-footer">
+        <span className="speech-status" aria-live="polite">
+          {speech.listening ? <><i /> Listening… speak naturally.</> : speech.error ?? (speech.supported ? 'Voice is handled by your browser’s speech service and is not stored by Recall.' : 'Dictation is not supported in this browser.')}
+        </span>
+        <button type="button" className="btn btn-primary btn-sm" disabled={!body.trim()} onClick={submit}>
+          <Plus size={15} aria-hidden /> Add note
+        </button>
+      </div>
+    </section>
   );
 }
 

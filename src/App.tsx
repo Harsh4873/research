@@ -19,6 +19,7 @@ import {
   withProgress,
 } from './lib/store';
 import { SAMPLE_MARKDOWN, SAMPLE_TITLE } from './lib/sample';
+import { withBundledSets } from './lib/bundled';
 import { Library, type ImportItem } from './components/Library';
 import { SetShell } from './components/SetShell';
 import { SyncMenu } from './components/SyncMenu';
@@ -58,7 +59,7 @@ function navigate(hash: string) {
 }
 
 export default function App() {
-  const [data, setData] = useState<AppData>(() => loadData());
+  const [data, setData] = useState<AppData>(() => withBundledSets(loadData()));
   const [route, setRoute] = useState<Route>(parseHash);
   const [notice, setNotice] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'off' });
@@ -173,7 +174,7 @@ export default function App() {
   };
 
   const removeSet = (set: StudySet) => {
-    if (!window.confirm(`Delete “${set.title}” and its progress? This also removes it from synced devices.`)) return;
+    if (!window.confirm(`Remove “${set.title}” and its progress? This also removes it from synced devices.`)) return;
     setData((d) => deleteSet(d, set.id, Date.now()));
     if (route.view === 'set' && route.setId === set.id) navigate('/');
   };
@@ -202,6 +203,13 @@ export default function App() {
 
   const saveMarkdown = (set: StudySet) => (markdown: string) => {
     setData((d) => upsertSet(d, { ...set, markdown, updatedAt: Date.now() }));
+  };
+
+  const appendNote = (set: StudySet) => (note: string) => {
+    const heading = /(^|\n)## Added notes\s*(\n|$)/i.test(set.markdown) ? '' : '\n\n## Added notes';
+    const markdown = `${set.markdown.trimEnd()}${heading}\n\n${note.trim()}\n`;
+    setData((d) => upsertSet(d, { ...set, markdown, updatedAt: Date.now() }));
+    setNotice('Note added. Your study material has been refreshed.');
   };
 
   const cycleTheme = () => {
@@ -261,6 +269,7 @@ export default function App() {
             onToggleStar={starFor(activeSet.id)}
             onBestTime={bestTimeFor(activeSet.id)}
             onSaveMarkdown={saveMarkdown(activeSet)}
+            onAddNote={appendNote(activeSet)}
             onDelete={() => removeSet(activeSet)}
             onExport={() => exportSet(activeSet)}
           />
@@ -278,8 +287,8 @@ export default function App() {
       </main>
 
       <footer className="app-footer">
-        Study sets are generated locally from your markdown. Turn on Sync to keep sets and progress on all your
-        devices; otherwise everything stays in this browser.
+        Study sets are generated locally from your markdown. Dictation uses your browser’s speech service; Recall
+        never stores the audio. Turn on Sync only when you want sets and progress on all your devices.
       </footer>
     </div>
   );

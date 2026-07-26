@@ -24,6 +24,10 @@ describe('parseInlines', () => {
     expect(plainText(runs)).toBe('strong snake_case_word stays');
   });
 
+  it('keeps the readable label when a link is bold', () => {
+    expect(parseInlines('**[PAML branch model](PAML.md)**')).toEqual([{ kind: 'bold', text: 'PAML branch model' }]);
+  });
+
   it('drops images but keeps alt text', () => {
     expect(plainText(parseInlines('see ![diagram of a cell](img.png) here'))).toBe('see diagram of a cell here');
   });

@@ -806,6 +806,65 @@ button {
   margin-bottom: 18px;
 }
 
+.note-composer {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.note-composer.is-listening {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+}
+
+.note-composer-heading,
+.note-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.note-composer-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.note-composer-heading strong {
+  font-size: 14px;
+}
+
+.note-composer-heading span,
+.speech-status {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.speech-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.speech-status i {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 13%, transparent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% { opacity: .45; transform: scale(.8); }
+}
+
 .article {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1569,6 +1628,17 @@ button {
 }
 
 @media (max-width: 560px) {
+  .note-composer-heading,
+  .note-composer-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .note-composer-heading .btn,
+  .note-composer-footer .btn {
+    width: 100%;
+  }
+
   .match-grid {
     grid-template-columns: repeat(2, 1fr);
   }

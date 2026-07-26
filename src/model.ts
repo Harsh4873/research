@@ -68,7 +68,7 @@ export interface ParsedDoc {
 }
 
 /** Where a term card was harvested from. */
-export type TermSource = 'bold' | 'colon' | 'table' | 'qa';
+export type TermSource = 'bold' | 'colon' | 'table' | 'qa' | 'section';
 
 export interface TermCard {
   id: string;

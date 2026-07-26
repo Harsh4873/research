@@ -139,6 +139,7 @@ export function Library({ data, materialFor, onImport, onLoadSample, onDelete, o
                   <button type="button" className="set-card-main" onClick={() => onOpen(set)}>
                     <div className="set-card-title">{set.title}</div>
                     <div className="set-card-meta">
+                      {set.id.startsWith('bundled-') && <span className="meta-chip">Included notes</span>}
                       <span className="meta-chip">{material.stats.terms} terms</span>
                       <span className="meta-chip">{material.stats.clozes} blanks</span>
                       <span className="meta-chip">{material.stats.readingMinutes} min</span>
@@ -154,7 +155,7 @@ export function Library({ data, materialFor, onImport, onLoadSample, onDelete, o
                     <button type="button" className="icon-btn" onClick={() => onExport(set)} aria-label={`Export ${set.title}`} title="Export as JSON">
                       <Download size={16} aria-hidden />
                     </button>
-                    <button type="button" className="icon-btn icon-btn-danger" onClick={() => onDelete(set)} aria-label={`Delete ${set.title}`} title="Delete set">
+                    <button type="button" className="icon-btn icon-btn-danger" onClick={() => onDelete(set)} aria-label={`Remove ${set.title}`} title="Remove set">
                       <Trash2 size={16} aria-hidden />
                     </button>
                   </div>

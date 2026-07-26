@@ -5,8 +5,10 @@ Recall is the owner's personal study tool, published at `https://harsh.bet/resea
 ## What it does
 
 - Imports `.md` / `.txt` notes by paste, file picker, or drag-and-drop; each document becomes a study set.
-- Extracts term–definition pairs from bold-term bullets, `Term: definition` lines, two-column tables, and `Q:`/`A:` pairs.
-- Generates fill-in-the-blank sentences from bold phrases and known terms found in prose.
+- Includes seven removable research-note sets on first load while keeping the uploader available for newer files.
+- Extracts term–definition pairs from definition sentences, bold-term bullets, `Term: definition` lines, tables, and `Q:`/`A:` pairs, then adds answerable section-level recall prompts for prose-heavy notes.
+- Generates fill-in-the-blank sentences from meaningful concepts and known terms while rejecting generic status words, verbs, and oversized emphasized claims.
+- Adds typed or browser-native speech-to-text notes directly from the Notes view; saved notes immediately refresh the generated study material.
 - Study modes: **Notes** (rendered outline + glossary), **Flashcards** (flip, star, self-grade), **Quiz** (multiple choice with distractors), **Blanks** (typed answers with fuzzy matching and hints), and **Match** (timed pairing game).
 - Tracks per-card mastery (learning → almost → mastered) and per-set progress, with a "focus weak cards" filter in every mode.
 - Exports and re-imports sets as JSON.
@@ -14,7 +16,7 @@ Recall is the owner's personal study tool, published at `https://harsh.bet/resea
 
 ## Privacy boundary
 
-By default everything runs in the browser: notes, generated cards, and progress live in `localStorage` on the device, and nothing is uploaded. Turning on **Sync** signs in with the owner's Google account and replicates sets and progress to the shared private Firebase project (`recall_users/{uid}/…` in Firestore); the security rules only admit the configured verified Google account. There are no other accounts, no analytics, and no other API calls.
+By default generation and storage run in the browser: notes, generated cards, and progress live in `localStorage` on the device. If the owner starts dictation, speech recognition is provided by the browser and may use its configured speech service; Recall does not store audio. Turning on **Sync** signs in with the owner's Google account and replicates sets and progress to the shared private Firebase project (`recall_users/{uid}/…` in Firestore); the security rules only admit the configured verified Google account. There are no other accounts or analytics.
 
 ## Local development
 
