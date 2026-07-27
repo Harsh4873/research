@@ -122,7 +122,7 @@ export function SetShell(props: SetShellProps) {
       </nav>
 
       <div className="mode-panel">
-        {mode === 'notes' && <NotesView material={material} onAddNote={props.onAddNote} />}
+        {mode === 'notes' && <NotesView material={material} markdown={set.markdown} onAddNote={props.onAddNote} />}
         {mode === 'cards' && (
           <Flashcards material={material} progress={progress} onAnswer={props.onAnswer} onToggleStar={props.onToggleStar} />
         )}
