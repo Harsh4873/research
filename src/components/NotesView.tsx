@@ -1,13 +1,52 @@
-import { useMemo, useState } from 'react';
-import { BookOpen, Clock, Hash, Layers, Mic, MicOff, Plus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  BookOpen,
+  Check,
+  Clock,
+  Copy,
+  Hash,
+  Layers,
+  Mic,
+  MicOff,
+  Pause,
+  Play,
+  Plus,
+  Square,
+  Volume2,
+} from 'lucide-react';
 import type { Block, ListBlock, StudyMaterial } from '../model';
 import { normalizeKey } from '../lib/extract';
 import { useSpeechInput } from '../lib/speech';
+import { speakableSegments, useReadAloud } from '../lib/readaloud';
+import { copyText } from '../lib/clipboard';
 import { InlineRuns } from './Inline';
 
-export function NotesView({ material, onAddNote }: { material: StudyMaterial; onAddNote: (note: string) => void }) {
+const READING_RATES = [0.75, 1, 1.25, 1.5];
+
+interface NotesViewProps {
+  material: StudyMaterial;
+  markdown: string;
+  onAddNote: (note: string) => void;
+}
+
+export function NotesView({ material, markdown, onAddNote }: NotesViewProps) {
   const termKeys = useMemo(() => new Set(material.terms.map((t) => normalizeKey(t.term))), [material]);
   const { stats, outline } = material;
+
+  const segments = useMemo(() => speakableSegments(material.doc.blocks), [material]);
+  const reader = useReadAloud(segments);
+  const activeHeading = useScrollSpy(outline.map((o) => o.id));
+
+  // Follow along: keep the sentence being read comfortably in view.
+  useEffect(() => {
+    if (reader.status !== 'playing' || reader.activeBlock < 0) return;
+    const el = document.getElementById(`b-${reader.activeBlock}`);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.top < 80 || rect.bottom > window.innerHeight - 40) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [reader.activeBlock, reader.status]);
 
   return (
     <div className="notes-layout">
@@ -18,7 +57,7 @@ export function NotesView({ material, onAddNote }: { material: StudyMaterial; on
             <button
               key={node.id}
               type="button"
-              className="outline-link"
+              className={`outline-link ${activeHeading === node.id ? 'outline-link-active' : ''}`}
               data-depth={node.depth}
               onClick={() => document.getElementById(`h-${node.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
             >
@@ -46,9 +85,11 @@ export function NotesView({ material, onAddNote }: { material: StudyMaterial; on
           </span>
         </div>
 
-        <article className="article">
+        <ReadingToolbar reader={reader} markdown={markdown} hasSegments={segments.length > 0} />
+
+        <article className={`article ${reader.status !== 'idle' ? 'is-reading' : ''}`}>
           {material.doc.blocks.map((block, i) => (
-            <BlockView key={i} block={block} termKeys={termKeys} />
+            <BlockView key={i} block={block} index={i} activeBlock={reader.activeBlock} termKeys={termKeys} />
           ))}
         </article>
 
@@ -68,6 +109,122 @@ export function NotesView({ material, onAddNote }: { material: StudyMaterial; on
       </div>
     </div>
   );
+}
+
+function ReadingToolbar({
+  reader,
+  markdown,
+  hasSegments,
+}: {
+  reader: ReturnType<typeof useReadAloud>;
+  markdown: string;
+  hasSegments: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const active = reader.status !== 'idle';
+
+  const copy = async () => {
+    const ok = await copyText(markdown);
+    if (!ok) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  return (
+    <div className={`reading-bar ${active ? 'reading-bar-active' : ''}`}>
+      <div className="reading-controls">
+        {reader.supported && hasSegments ? (
+          <button type="button" className="btn btn-primary btn-sm" onClick={reader.toggle}>
+            {reader.status === 'playing' ? (
+              <>
+                <Pause size={15} aria-hidden /> Pause
+              </>
+            ) : (
+              <>
+                {reader.status === 'paused' ? <Play size={15} aria-hidden /> : <Volume2 size={15} aria-hidden />}
+                {reader.status === 'paused' ? 'Resume' : 'Listen'}
+              </>
+            )}
+          </button>
+        ) : (
+          <span className="reading-hint">
+            <Volume2 size={14} aria-hidden /> Read-aloud isn’t available in this browser.
+          </span>
+        )}
+
+        {active && (
+          <>
+            <button type="button" className="icon-btn icon-btn-sm" onClick={reader.stop} aria-label="Stop reading" title="Stop">
+              <Square size={14} aria-hidden />
+            </button>
+            <div className="rate-group" role="group" aria-label="Reading speed">
+              {READING_RATES.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className={`rate-chip ${reader.rate === r ? 'rate-chip-active' : ''}`}
+                  onClick={() => reader.setRate(r)}
+                >
+                  {r}×
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <button type="button" className={`btn btn-sm ${copied ? 'btn-success' : ''}`} onClick={copy}>
+        {copied ? (
+          <>
+            <Check size={15} aria-hidden /> Copied
+          </>
+        ) : (
+          <>
+            <Copy size={15} aria-hidden /> Copy markdown
+          </>
+        )}
+      </button>
+
+      {active && (
+        <div className="reading-progress" aria-hidden>
+          <div className="reading-progress-fill" style={{ width: `${Math.round(reader.progress * 100)}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Highlight the outline entry for the heading nearest the top of the viewport. */
+function useScrollSpy(ids: string[]): string | null {
+  const [active, setActive] = useState<string | null>(null);
+  const key = ids.join('|');
+
+  useEffect(() => {
+    if (ids.length === 0 || typeof IntersectionObserver === 'undefined') return;
+    const visible = new Map<string, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = entry.target.id.replace(/^h-/, '');
+          if (entry.isIntersecting) visible.set(id, entry.boundingClientRect.top);
+          else visible.delete(id);
+        }
+        if (visible.size > 0) {
+          const top = [...visible.entries()].sort((a, b) => a[1] - b[1])[0][0];
+          setActive(top);
+        }
+      },
+      { rootMargin: '-72px 0px -70% 0px', threshold: 0 },
+    );
+    for (const id of ids) {
+      const el = document.getElementById(`h-${id}`);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return active;
 }
 
 function NoteComposer({ onAdd }: { onAdd: (note: string) => void }) {
@@ -121,28 +278,47 @@ function NoteComposer({ onAdd }: { onAdd: (note: string) => void }) {
   );
 }
 
-function BlockView({ block, termKeys }: { block: Block; termKeys: Set<string> }) {
+function BlockView({
+  block,
+  index,
+  activeBlock,
+  termKeys,
+}: {
+  block: Block;
+  index: number;
+  activeBlock: number;
+  termKeys: Set<string>;
+}) {
+  const speaking = index >= 0 && index === activeBlock;
+  const anchorId = index >= 0 ? `b-${index}` : undefined;
+  const speakingClass = speaking ? 'speaking' : undefined;
   switch (block.type) {
     case 'heading': {
       const depth = Math.min(6, block.depth + 1);
       const Tag = `h${depth}` as 'h2';
       return (
         <Tag id={`h-${block.id}`}>
-          <InlineRuns runs={block.inlines} termKeys={termKeys} />
+          <span id={anchorId} className={speakingClass}>
+            <InlineRuns runs={block.inlines} termKeys={termKeys} />
+          </span>
         </Tag>
       );
     }
     case 'para':
       return (
-        <p>
+        <p id={anchorId} className={speakingClass}>
           <InlineRuns runs={block.inlines} termKeys={termKeys} />
         </p>
       );
     case 'list':
-      return <ListView list={block} termKeys={termKeys} />;
+      return (
+        <div id={anchorId} className={speakingClass}>
+          <ListView list={block} termKeys={termKeys} />
+        </div>
+      );
     case 'table':
       return (
-        <div className="table-scroll">
+        <div id={anchorId} className={`table-scroll ${speaking ? 'speaking' : ''}`}>
           <table className="doc-table">
             <thead>
               <tr>
@@ -165,9 +341,9 @@ function BlockView({ block, termKeys }: { block: Block; termKeys: Set<string> })
       );
     case 'quote':
       return (
-        <blockquote>
+        <blockquote id={anchorId} className={speakingClass}>
           {block.blocks.map((child, i) => (
-            <BlockView key={i} block={child} termKeys={termKeys} />
+            <BlockView key={i} block={child} index={-2} activeBlock={activeBlock} termKeys={termKeys} />
           ))}
         </blockquote>
       );
