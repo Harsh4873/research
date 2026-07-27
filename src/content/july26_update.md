@@ -140,5 +140,5 @@ number, since 19 exist and the paper takes 6.
 1. eccB3 verdict, then finish or drop the eccD3/eccB3 pair framing
 2. Last 238 PAML genes, then refresh Table 5 and Fig 2b
 3. FASTER runs land, then build the three remaining `master/` folders and the consolidated sheet
-4. Resolve the Table 7 vs 8 numbering with Ioerger
+4. Resolve the Table 7 vs 8 numbering with the project lead
 5. Choose 6 figures from the 19

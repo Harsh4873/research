@@ -4,9 +4,10 @@ import { extractStudyMaterial } from '../src/lib/extract';
 import { defaultData, deleteSet } from '../src/lib/store';
 
 describe('bundled research notes', () => {
-  it('ships all nine requested documents as substantial study sets', () => {
+  it('ships all ten requested documents as substantial study sets', () => {
     expect(BUNDLED_SETS.map((set) => set.title)).toEqual([
       'Project overview',
+      'Introduction & references',
       'July 26 update',
       'GenomegaMap',
       'PAML',
@@ -47,5 +48,8 @@ describe('bundled research notes', () => {
     expect(joined).not.toContain('csce-bwgsh03');
     expect(joined).not.toContain('dr. ioerger');
     expect(joined).not.toContain("ioerger's");
+    expect(joined).not.toContain('ioerger');
+    expect(joined).not.toContain('miscellaneous/notes/attachments');
+    expect(joined).not.toContain('notes/emails/');
   });
 });

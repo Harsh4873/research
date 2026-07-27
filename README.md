@@ -5,7 +5,7 @@ Recall is the owner's personal study tool, published at `https://harsh.bet/resea
 ## What it does
 
 - Imports `.md` / `.txt` notes by paste, file picker, or drag-and-drop; each document becomes a study set.
-- Includes nine removable research-note sets on first load while keeping the uploader available for newer files.
+- Includes ten removable research-note sets on first load while keeping the uploader available for newer files.
 - Extracts term–definition pairs from definition sentences, bold-term bullets, `Term: definition` lines, tables, and `Q:`/`A:` pairs, then adds answerable section-level recall prompts for prose-heavy notes.
 - Generates fill-in-the-blank sentences from meaningful concepts and known terms while rejecting generic status words, verbs, and oversized emphasized claims.
 - Adds typed or browser-native speech-to-text notes directly from the Notes view; saved notes immediately refresh the generated study material.

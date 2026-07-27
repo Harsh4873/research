@@ -26,7 +26,7 @@ diabetes, near 0 means more in non-diabetes.
 
 ## 2. Headline: the main result got stronger
 
-The expansion did what Ioerger predicted. Tighter non-diabetes posteriors pushed DPD further from 0.5
+The expansion did what the project lead predicted. Tighter non-diabetes posteriors pushed DPD further from 0.5
 for the genes with a real difference.
 
 | | 175-run | 744-run |
@@ -180,7 +180,7 @@ dies (change is removed). Adjacent parts, opposite selection, because they do di
 ## 9. The PAML rerun (added 2026-07-24)
 
 The open item from section 7 is closed. the project lead sent the rebuilt **922-tip phylogeny** on
-2026-07-24 (`FinalPaml/data/ioerger_tree/`), already binary, tips matching the cohort exactly. The
+2026-07-24 (`FinalPaml/data/reference_tree/`), already binary, tips matching the cohort exactly. The
 branch-model rerun launched on Grace at 23:29 the same night.
 
 **What changed for PAML because of the expansion:**

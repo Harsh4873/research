@@ -1,6 +1,7 @@
 import type { AppData, StudySet } from '../model';
 import genomegaMap from '../content/GenomegaMap.md?raw';
 import figures from '../content/Figures.md?raw';
+import introAndReferences from '../content/Intro_and_References.md?raw';
 import july26Update from '../content/july26_update.md?raw';
 import ndb12Update from '../content/NDB12_Update.md?raw';
 import paml from '../content/PAML.md?raw';
@@ -19,6 +20,7 @@ function bundledSet(id: string, title: string, markdown: string): StudySet {
 /** Research notes that ship with Recall and remain ordinary, removable sets. */
 export const BUNDLED_SETS: readonly StudySet[] = [
   bundledSet('overview', 'Project overview', projectOverview),
+  bundledSet('intro-and-references', 'Introduction & references', introAndReferences),
   bundledSet('july26-update', 'July 26 update', july26Update),
   bundledSet('genomegamap', 'GenomegaMap', genomegaMap),
   bundledSet('paml', 'PAML', paml),
