@@ -23,6 +23,10 @@ import { withBundledSets } from './lib/bundled';
 import { Library, type ImportItem } from './components/Library';
 import { SetShell } from './components/SetShell';
 import { SyncMenu } from './components/SyncMenu';
+import { Landing } from './components/Landing';
+import { ReviewView, type PaperDraft } from './components/ReviewView';
+import { createPaperSet, isPaperSet } from './lib/paper-set';
+import { parsePaperId, describePaperId } from './lib/paper-id';
 
 const SYNC_FLAG_KEY = 'recall.sync.on';
 
@@ -43,7 +47,11 @@ function setSyncFlag(on: boolean) {
   }
 }
 
-type Route = { view: 'library' } | { view: 'set'; setId: string; mode: Mode };
+type Route =
+  | { view: 'home' }
+  | { view: 'library' }
+  | { view: 'review' }
+  | { view: 'set'; setId: string; mode: Mode };
 
 function parseHash(): Route {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -51,7 +59,9 @@ function parseHash(): Route {
     const mode = (MODES as readonly string[]).includes(parts[2]) ? (parts[2] as Mode) : 'notes';
     return { view: 'set', setId: parts[1], mode };
   }
-  return { view: 'library' };
+  if (parts[0] === 'recall') return { view: 'library' };
+  if (parts[0] === 'review') return { view: 'review' };
+  return { view: 'home' };
 }
 
 function navigate(hash: string) {
@@ -176,7 +186,40 @@ export default function App() {
   const removeSet = (set: StudySet) => {
     if (!window.confirm(`Remove “${set.title}” and its progress? This also removes it from synced devices.`)) return;
     setData((d) => deleteSet(d, set.id, Date.now()));
-    if (route.view === 'set' && route.setId === set.id) navigate('/');
+    if (route.view === 'set' && route.setId === set.id) navigate(isPaperSet(set.id) ? '/review' : '/recall');
+  };
+
+  /** Review: resolve a PMID / PMCID / DOI into study markdown. */
+  const lookupPaper = async (query: string, onStatus: (status: string) => void): Promise<PaperDraft> => {
+    const id = parsePaperId(query);
+    if (!id) throw new Error('That does not look like a PMID, PMCID, or DOI.');
+    onStatus(`Looking up ${describePaperId(id)}…`);
+    const { lookupPaper: lookup } = await import('./lib/europepmc');
+    const result = await lookup(id);
+    onStatus('Building study material…');
+    return { ...result, note: result.openAccessNote };
+  };
+
+  /** Review: read a PDF entirely on this device. */
+  const importPdf = async (file: File, onStatus: (status: string) => void): Promise<PaperDraft> => {
+    onStatus('Opening the PDF…');
+    const { pdfToMarkdown } = await import('./lib/pdf-import');
+    const conversion = await pdfToMarkdown(file, {
+      fallbackTitle: file.name,
+      onProgress: ({ page, pages }) => onStatus(`Reading page ${page} of ${pages}…`),
+    });
+    onStatus('Building study material…');
+    return {
+      ...conversion,
+      fullText: true,
+      note: 'Extracted from your PDF on this device. Layout-based extraction is best effort — use the pencil icon in the set to fix anything that came out wrong.',
+    };
+  };
+
+  const savePaper = (draft: PaperDraft) => {
+    const set = createPaperSet(draft.meta.title, draft.markdown, Date.now());
+    setData((d) => upsertSet(d, set));
+    navigate(`/set/${set.id}/notes`);
   };
 
   const exportSet = (set: StudySet) => {
@@ -235,6 +278,22 @@ export default function App() {
             </span>
             Recall
           </button>
+          <nav className="header-nav" aria-label="Sections">
+            <button
+              type="button"
+              className={`header-tab ${route.view === 'library' ? 'header-tab-active' : ''}`}
+              onClick={() => navigate('/recall')}
+            >
+              Recall
+            </button>
+            <button
+              type="button"
+              className={`header-tab ${route.view === 'review' ? 'header-tab-active' : ''}`}
+              onClick={() => navigate('/review')}
+            >
+              Review
+            </button>
+          </nav>
           <div className="header-actions">
             <SyncMenu status={syncStatus} onEnable={() => void enableSync()} onSignOut={() => void disableSync()} />
             <button
@@ -264,7 +323,8 @@ export default function App() {
             progress={getProgress(data, activeSet.id)}
             mode={route.mode}
             onNavigate={(mode) => navigate(`/set/${activeSet.id}/${mode}`)}
-            onBack={() => navigate('/')}
+            onBack={() => navigate(isPaperSet(activeSet.id) ? '/review' : '/recall')}
+            backLabel={isPaperSet(activeSet.id) ? 'Review' : 'Library'}
             onAnswer={answerFor(activeSet.id)}
             onToggleStar={starFor(activeSet.id)}
             onBestTime={bestTimeFor(activeSet.id)}
@@ -273,9 +333,20 @@ export default function App() {
             onDelete={() => removeSet(activeSet)}
             onExport={() => exportSet(activeSet)}
           />
-        ) : (
-          <Library
+        ) : route.view === 'review' ? (
+          <ReviewView
             data={data}
+            materialFor={materialFor}
+            onLookup={lookupPaper}
+            onImportPdf={importPdf}
+            onSave={savePaper}
+            onOpen={(set) => navigate(`/set/${set.id}/notes`)}
+            onDelete={removeSet}
+            onExport={exportSet}
+          />
+        ) : route.view === 'library' ? (
+          <Library
+            data={{ ...data, sets: data.sets.filter((set) => !isPaperSet(set.id)) }}
             materialFor={materialFor}
             onImport={importItems}
             onLoadSample={loadSample}
@@ -283,6 +354,8 @@ export default function App() {
             onExport={exportSet}
             onOpen={(set) => navigate(`/set/${set.id}/notes`)}
           />
+        ) : (
+          <Landing data={data} onRecall={() => navigate('/recall')} onReview={() => navigate('/review')} />
         )}
       </main>
 

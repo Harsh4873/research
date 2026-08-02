@@ -1,6 +1,22 @@
 # Recall
 
-Recall is the owner's personal study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. Paste or upload Markdown notes and Recall turns them into study material — flashcards, quizzes, fill-in-the-blanks, matching games, and a clean reading view. Turning on Sync keeps the same sets and progress on every signed-in device (phone and laptop).
+Recall is the owner's personal study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. The landing page offers two ways in:
+
+- **Recall** — paste or upload Markdown notes and turn them into study material.
+- **Review** — give it a PMID, PMCID, DOI, or a PDF; it rebuilds the paper as sectioned Markdown and studies it with the same engine.
+
+Either route produces flashcards, quizzes, fill-in-the-blanks, matching games, and a clean reading view with read-aloud. Turning on Sync keeps the same sets and progress on every signed-in device (phone and laptop).
+
+## Review: papers into study sets
+
+- Accepts a bare PMID, a PMCID, a DOI, or a pasted PubMed / PMC / Europe PMC / doi.org URL.
+- Fetches open-access full text from Europe PMC as JATS XML and converts it to Markdown: sectioned headings, structured abstract, GFM tables with captions and footnotes, equations (LaTeX and MathML), figure captions, supplementary material, glossary, and references.
+- Falls back to the PubMed abstract (via Europe PMC, then NCBI E-utilities) when a paper is not open access, and says so plainly.
+- **PDF upload** for anything paywalled: the file is parsed on the device with PDF.js — column-aware line reconstruction, heading detection, running-head removal, table and equation heuristics, and caption capture. Nothing is uploaded.
+- Mines an abbreviations glossary from the prose, so `Operational taxonomic unit (OTU)` becomes a flashcard.
+- Every paper is an ordinary study set: it syncs, exports, and studies exactly like a note set.
+
+All lookups use free, key-less public APIs (Europe PMC and NCBI E-utilities) straight from the browser; there is no backend.
 
 ## What it does
 

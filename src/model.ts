@@ -64,6 +64,8 @@ export type Block =
 
 export interface ParsedDoc {
   title?: string;
+  /** Lower-cased YAML front matter keys, when the document has any. */
+  meta?: Record<string, string>;
   blocks: Block[];
 }
 
