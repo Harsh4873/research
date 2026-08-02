@@ -24,9 +24,12 @@ import { Library, type ImportItem } from './components/Library';
 import { SetShell } from './components/SetShell';
 import { SyncMenu } from './components/SyncMenu';
 import { Landing } from './components/Landing';
-import { ReviewView, type PaperDraft } from './components/ReviewView';
-import { createPaperSet, isPaperSet } from './lib/paper-set';
-import { parsePaperId, describePaperId } from './lib/paper-id';
+import { ReviewView, type BulkOutcome, type PaperDraft } from './components/ReviewView';
+import { createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
+
+/** A reference list can be long; keep one paste from running away. */
+const MAX_BULK_LOOKUPS = 120;
+import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
 
 const SYNC_FLAG_KEY = 'recall.sync.on';
 
@@ -216,10 +219,59 @@ export default function App() {
     };
   };
 
+  /** Review: resolve a whole reference list, one paper at a time. */
+  const lookupPapers = async (text: string, onStatus: (status: string) => void): Promise<BulkOutcome> => {
+    const found = parsePaperIds(text);
+    const ids = found.slice(0, MAX_BULK_LOOKUPS);
+    const { lookupPaper: lookup } = await import('./lib/europepmc');
+    const drafts: PaperDraft[] = [];
+    const failures: BulkOutcome['failures'] = [];
+    const seen = new Set(data.sets.filter((s) => isPaperSet(s.id)).map((s) => paperIdentity(paperFrontMatter(s.markdown))));
+
+    for (const [index, id] of ids.entries()) {
+      onStatus(`Fetching ${index + 1} of ${ids.length} — ${describePaperId(id)}…`);
+      try {
+        const result = await lookup(id);
+        // A reference list cites the same paper by PMID, DOI, and PMCID, and
+        // some of them may already be in the library.
+        const identity = paperIdentity(result.meta);
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        drafts.push({ ...result, note: result.openAccessNote });
+      } catch (error) {
+        failures.push({ label: describePaperId(id), message: (error as Error)?.message ?? 'Lookup failed.' });
+      }
+    }
+    if (found.length > ids.length) {
+      failures.push({
+        label: `${found.length - ids.length} more identifiers`,
+        message: `Only the first ${MAX_BULK_LOOKUPS} were fetched.`,
+      });
+    }
+    return { drafts, failures };
+  };
+
+  const readReferenceFile = async (file: File): Promise<string> => {
+    const { readReferenceFile: read } = await import('./lib/reference-file');
+    return read(file);
+  };
+
   const savePaper = (draft: PaperDraft) => {
     const set = createPaperSet(draft.meta.title, draft.markdown, Date.now());
     setData((d) => upsertSet(d, set));
     navigate(`/set/${set.id}/notes`);
+  };
+
+  const savePapers = (drafts: PaperDraft[]) => {
+    if (drafts.length === 0) return;
+    const now = Date.now();
+    setData((d) =>
+      drafts.reduce(
+        (acc, draft, index) => upsertSet(acc, createPaperSet(draft.meta.title, draft.markdown, now + index)),
+        d,
+      ),
+    );
+    setNotice(`Added ${drafts.length} papers to Review.`);
   };
 
   const exportSet = (set: StudySet) => {
@@ -338,8 +390,11 @@ export default function App() {
             data={data}
             materialFor={materialFor}
             onLookup={lookupPaper}
+            onLookupMany={lookupPapers}
             onImportPdf={importPdf}
+            onReadReferenceFile={readReferenceFile}
             onSave={savePaper}
+            onSaveMany={savePapers}
             onOpen={(set) => navigate(`/set/${set.id}/notes`)}
             onDelete={removeSet}
             onExport={exportSet}

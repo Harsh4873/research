@@ -18,7 +18,8 @@ import {
 import type { AppData, StudyMaterial, StudySet } from '../model';
 import { masteryPercent } from '../lib/store';
 import { isPaperSet, paperFrontMatter, paperSubtitle } from '../lib/paper-set';
-import { parsePaperId } from '../lib/paper-id';
+import { parsePaperIds } from '../lib/paper-id';
+import { isReferenceFile } from '../lib/reference-file';
 import { copyText } from '../lib/clipboard';
 import type { PaperConversion } from '../lib/jats';
 
@@ -27,18 +28,31 @@ export interface PaperDraft extends PaperConversion {
   note: string;
 }
 
+export interface BulkOutcome {
+  drafts: PaperDraft[];
+  failures: Array<{ label: string; message: string }>;
+}
+
 interface ReviewViewProps {
   data: AppData;
   materialFor: (set: StudySet) => StudyMaterial;
   onLookup: (query: string, onStatus: (status: string) => void) => Promise<PaperDraft>;
+  onLookupMany: (text: string, onStatus: (status: string) => void) => Promise<BulkOutcome>;
   onImportPdf: (file: File, onStatus: (status: string) => void) => Promise<PaperDraft>;
+  onReadReferenceFile: (file: File) => Promise<string>;
   onSave: (draft: PaperDraft) => void;
+  onSaveMany: (drafts: PaperDraft[]) => void;
   onOpen: (set: StudySet) => void;
   onDelete: (set: StudySet) => void;
   onExport: (set: StudySet) => void;
 }
 
-type Phase = { kind: 'idle' } | { kind: 'working'; status: string } | { kind: 'error'; message: string } | { kind: 'ready'; draft: PaperDraft };
+type Phase =
+  | { kind: 'idle' }
+  | { kind: 'working'; status: string }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; draft: PaperDraft }
+  | { kind: 'bulk'; outcome: BulkOutcome };
 
 const EXAMPLES = [
   { label: 'PMID 23193287', value: '23193287' },
@@ -56,13 +70,13 @@ export function ReviewView(props: ReviewViewProps) {
 
   const papers = data.sets.filter((set) => isPaperSet(set.id));
   const busy = phase.kind === 'working';
+  const pendingCount = query.trim() ? parsePaperIds(query).length : 0;
 
-  const run = async (task: (onStatus: (status: string) => void) => Promise<PaperDraft>) => {
+  const run = async (task: (onStatus: (status: string) => void) => Promise<Phase>) => {
     setPhase({ kind: 'working', status: 'Starting…' });
     setCopied(false);
     try {
-      const draft = await task((status) => setPhase({ kind: 'working', status }));
-      setPhase({ kind: 'ready', draft });
+      setPhase(await task((status) => setPhase({ kind: 'working', status })));
     } catch (error) {
       const err = error as { message?: string; hint?: string };
       setPhase({
@@ -72,28 +86,51 @@ export function ReviewView(props: ReviewViewProps) {
     }
   };
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = query.trim();
-    if (!trimmed || busy) return;
-    const id = parsePaperId(trimmed);
-    if (!id) {
+  const runOne = (query: string) =>
+    run(async (onStatus) => ({ kind: 'ready', draft: await props.onLookup(query, onStatus) }));
+
+  const runMany = (text: string) =>
+    run(async (onStatus) => ({ kind: 'bulk', outcome: await props.onLookupMany(text, onStatus) }));
+
+  /** One identifier opens a preview; a list is fetched in bulk. */
+  const importText = (text: string) => {
+    const ids = parsePaperIds(text);
+    if (ids.length === 0) {
       setPhase({
         kind: 'error',
-        message: 'That does not look like a PMID, PMCID, or DOI. Try 23193287, PMC3531190, or 10.1093/nar/gks1195.',
+        message:
+          'No PMID, PMCID, or DOI found in that. Try 23193287, PMC3531190, or 10.1093/nar/gks1195 — or paste a whole reference list.',
       });
       return;
     }
-    void run((onStatus) => props.onLookup(trimmed, onStatus));
+    if (ids.length === 1) void runOne(text.trim());
+    else void runMany(text);
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!query.trim() || busy) return;
+    importText(query);
   };
 
   const handleFile = (file: File) => {
     if (busy) return;
-    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
-      setPhase({ kind: 'error', message: `“${file.name}” is not a PDF.` });
+    if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+      void run(async (onStatus) => ({ kind: 'ready', draft: await props.onImportPdf(file, onStatus) }));
       return;
     }
-    void run((onStatus) => props.onImportPdf(file, onStatus));
+    if (isReferenceFile(file.name)) {
+      void (async () => {
+        setPhase({ kind: 'working', status: `Reading ${file.name}…` });
+        try {
+          importText(await props.onReadReferenceFile(file));
+        } catch (error) {
+          setPhase({ kind: 'error', message: (error as Error)?.message ?? `Could not read ${file.name}.` });
+        }
+      })();
+      return;
+    }
+    setPhase({ kind: 'error', message: `“${file.name}” is not a PDF or a reference list.` });
   };
 
   const onDrop = (event: DragEvent) => {
@@ -133,19 +170,26 @@ export function ReviewView(props: ReviewViewProps) {
         <form className="review-search" onSubmit={submit}>
           <div className="review-search-field">
             <Search size={17} aria-hidden />
-            <input
+            <textarea
               className="input review-input"
+              rows={query.includes('\n') || query.length > 90 ? 4 : 1}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="PMID, PMCID, DOI, or a PubMed link…"
-              aria-label="Paper identifier"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !query.includes('\n')) {
+                  event.preventDefault();
+                  submit(event);
+                }
+              }}
+              placeholder="PMID, PMCID, DOI, a PubMed link — or paste a whole list…"
+              aria-label="Paper identifiers"
               disabled={busy}
               spellCheck={false}
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={busy || !query.trim()}>
             {busy ? <Loader2 size={16} aria-hidden className="spin" /> : <BookOpenCheck size={16} aria-hidden />}
-            Fetch paper
+            {pendingCount > 1 ? `Fetch ${pendingCount} papers` : 'Fetch paper'}
           </button>
         </form>
 
@@ -159,7 +203,7 @@ export function ReviewView(props: ReviewViewProps) {
               disabled={busy}
               onClick={() => {
                 setQuery(example.value);
-                void run((onStatus) => props.onLookup(example.value, onStatus));
+                void runOne(example.value);
               }}
             >
               {example.label}
@@ -178,9 +222,10 @@ export function ReviewView(props: ReviewViewProps) {
         >
           <Upload size={18} aria-hidden />
           <div>
-            <strong>Not open access? Drop the PDF here.</strong>
+            <strong>Drop a PDF, or a reference list.</strong>
             <span>
-              The PDF is read on this device — nothing is uploaded.{' '}
+              A PDF is read on this device; a <code>.docx</code>, <code>.txt</code>, or <code>.csv</code> list is
+              scanned for every PMID, PMCID, and DOI in it.{' '}
               <button type="button" className="link-btn" disabled={busy} onClick={() => fileInput.current?.click()}>
                 choose a file
               </button>
@@ -189,7 +234,7 @@ export function ReviewView(props: ReviewViewProps) {
           <input
             ref={fileInput}
             type="file"
-            accept="application/pdf,.pdf"
+            accept="application/pdf,.pdf,.docx,.txt,.md,.csv,.tsv,.nbib,.ris"
             hidden
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -208,6 +253,68 @@ export function ReviewView(props: ReviewViewProps) {
         {phase.kind === 'error' && (
           <div className="review-error fade-in" role="alert">
             <AlertTriangle size={16} aria-hidden /> {phase.message}
+          </div>
+        )}
+
+        {phase.kind === 'bulk' && (
+          <div className="review-result fade-in">
+            <div className="review-result-head">
+              <div>
+                <h2 className="review-result-title">
+                  {phase.outcome.drafts.length} paper{phase.outcome.drafts.length === 1 ? '' : 's'} ready
+                </h2>
+                <p className="review-result-meta">
+                  {phase.outcome.drafts.filter((d) => d.fullText).length} with full text ·{' '}
+                  {phase.outcome.drafts.filter((d) => !d.fullText).length} abstract only
+                  {phase.outcome.failures.length > 0 ? ` · ${phase.outcome.failures.length} not found` : ''}
+                </p>
+              </div>
+            </div>
+
+            <ul className="bulk-list">
+              {phase.outcome.drafts.map((item, index) => (
+                <li key={index} className="bulk-item">
+                  <span className={`bulk-dot ${item.fullText ? 'bulk-dot-full' : 'bulk-dot-partial'}`} aria-hidden />
+                  <span className="bulk-title">{item.meta.title}</span>
+                  <span className="bulk-meta">
+                    {[item.meta.year, item.meta.pmid ? `PMID ${item.meta.pmid}` : ''].filter(Boolean).join(' · ')}
+                  </span>
+                </li>
+              ))}
+              {phase.outcome.failures.map((failure, index) => (
+                <li key={`f${index}`} className="bulk-item bulk-item-failed">
+                  <span className="bulk-dot bulk-dot-failed" aria-hidden />
+                  <span className="bulk-title">{failure.label}</span>
+                  <span className="bulk-meta">{failure.message}</span>
+                </li>
+              ))}
+            </ul>
+
+            {phase.outcome.failures.length > 0 && phase.outcome.drafts.length > 0 && (
+              <p className="review-note">
+                Reference lists cite the same paper by PMID, DOI, and PMCID at once. Duplicates were merged, and an
+                identifier that did not resolve on its own may still be covered by its paper above.
+              </p>
+            )}
+
+            <div className="review-result-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={phase.outcome.drafts.length === 0}
+                onClick={() => {
+                  props.onSaveMany(phase.outcome.drafts);
+                  setPhase({ kind: 'idle' });
+                  setQuery('');
+                }}
+              >
+                Add {phase.outcome.drafts.length} paper{phase.outcome.drafts.length === 1 ? '' : 's'} to Review{' '}
+                <ArrowRight size={16} aria-hidden />
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPhase({ kind: 'idle' })}>
+                Discard
+              </button>
+            </div>
           </div>
         )}
 

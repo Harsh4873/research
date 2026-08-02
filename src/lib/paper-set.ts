@@ -17,6 +17,30 @@ export function createPaperSet(title: string, markdown: string, now: number): St
   return { id, title: title.trim() || 'Untitled paper', markdown, createdAt: now, updatedAt: now };
 }
 
+/**
+ * A stable identity for a fetched paper. Reference lists cite the same work by
+ * PMID, DOI, and PMCID at once, so bulk imports must collapse them.
+ */
+export function paperIdentity(meta: { pmid?: string; pmcid?: string; doi?: string; title?: string }): string {
+  if (meta.pmid) return `pmid:${meta.pmid}`;
+  if (meta.pmcid) return `pmcid:${meta.pmcid.toUpperCase()}`;
+  if (meta.doi) return `doi:${meta.doi.toLowerCase()}`;
+  return `title:${(meta.title ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
+}
+
+/** Keep the first copy of each distinct paper, preferring richer full text. */
+export function dedupePapers<T extends { meta: { pmid?: string; pmcid?: string; doi?: string; title?: string }; fullText?: boolean }>(
+  items: T[],
+): T[] {
+  const byIdentity = new Map<string, T>();
+  for (const item of items) {
+    const key = paperIdentity(item.meta);
+    const existing = byIdentity.get(key);
+    if (!existing || (item.fullText === true && existing.fullText !== true)) byIdentity.set(key, item);
+  }
+  return [...byIdentity.values()];
+}
+
 export interface PaperFrontMatter {
   title?: string;
   authors?: string;

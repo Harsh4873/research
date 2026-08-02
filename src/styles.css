@@ -805,6 +805,74 @@ button {
   gap: 9px;
 }
 
+.bulk-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.bulk-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+
+.bulk-item:last-child {
+  border-bottom: 0;
+}
+
+.bulk-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.bulk-dot-full {
+  background: var(--green);
+}
+
+.bulk-dot-partial {
+  background: var(--amber);
+}
+
+.bulk-dot-failed {
+  background: var(--red);
+}
+
+.bulk-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-meta {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bulk-item-failed .bulk-title {
+  color: var(--text-soft);
+}
+
+textarea.review-input {
+  resize: vertical;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  padding-top: 10px;
+}
+
 .set-card-sub {
   color: var(--text-soft);
   font-size: 13px;

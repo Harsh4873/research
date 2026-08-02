@@ -10,6 +10,7 @@ Either route produces flashcards, quizzes, fill-in-the-blanks, matching games, a
 ## Review: papers into study sets
 
 - Accepts a bare PMID, a PMCID, a DOI, or a pasted PubMed / PMC / Europe PMC / doi.org URL.
+- **Bulk import**: paste a whole reference list, or drop a `.docx` / `.txt` / `.csv` / `.ris` of one. Every PMID, PMCID, and DOI in it is fetched, and the copies of a paper cited three different ways collapse into one set.
 - Fetches open-access full text from Europe PMC as JATS XML and converts it to Markdown: sectioned headings, structured abstract, GFM tables with captions and footnotes, equations (LaTeX and MathML), figure captions, supplementary material, glossary, and references.
 - Falls back to the PubMed abstract (via Europe PMC, then NCBI E-utilities) when a paper is not open access, and says so plainly.
 - **PDF upload** for anything paywalled: the file is parsed on the device with PDF.js — column-aware line reconstruction, heading detection, running-head removal, table and equation heuristics, and caption capture. Nothing is uploaded.
