@@ -49,6 +49,8 @@ PDF file           ─→ lib/pdf-import.ts   PDF.js text runs (lazy-loaded)
 - Markdown is shaped for the extractor: glossary bullets and two-column tables become term cards, prose sections become recall prompts, and citation/keyword lines are deliberately written without bold or `Term: value` shapes so they cannot turn into junk cards.
 - `extract.ts` skips publishing apparatus (references, acknowledgements, funding, conflicts) entirely, and skips section-question generation for headings that make poor questions (glossary, contents, supplementary material) while still mining their contents.
 
+`src/lib/paper-search.ts` searches the saved papers. Every query token must match somewhere (so extra words narrow the result), while *where* it matched sets the rank: an exact identifier outranks a title hit, which outranks author, journal, year, and finally body text — body matches carry a snippet. `findExistingPaper` resolves an identifier against the library so a lookup of something already saved opens it rather than refetching.
+
 ### Review reading views
 
 `src/lib/paper-view.ts` derives everything the Review tabs show from the parsed document, so the heuristics are unit-tested without a browser:
