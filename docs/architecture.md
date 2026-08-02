@@ -49,6 +49,17 @@ PDF file           ─→ lib/pdf-import.ts   PDF.js text runs (lazy-loaded)
 - Markdown is shaped for the extractor: glossary bullets and two-column tables become term cards, prose sections become recall prompts, and citation/keyword lines are deliberately written without bold or `Term: value` shapes so they cannot turn into junk cards.
 - `extract.ts` skips publishing apparatus (references, acknowledgements, funding, conflicts) entirely, and skips section-question generation for headings that make poor questions (glossary, contents, supplementary material) while still mining their contents.
 
+### Review reading views
+
+`src/lib/paper-view.ts` derives everything the Review tabs show from the parsed document, so the heuristics are unit-tested without a browser:
+
+- **Data** — tables, equations, and figure captions are recovered by pairing each level-4 float heading (`#### Table 1. …`) with the block that follows it. Supplementary entries are parsed back out of the markdown list and linked to their PMC download path (`/pmc/articles/{PMCID}/bin/{file}`); data-availability sections are matched by heading.
+- **Claims** — sentences are scored against authorial-claim patterns (`we found`, `our results suggest`, `taken together`), boosted by the numbers they contain and penalised for hedging, then classified as finding / conclusion / quantified.
+- **Find** — a linear scan over blocks returning match ranges for highlighting, plus a numbers mode built on a measurement-shaped regex (p-values, effect sizes, percentages, units, ratios) that deliberately skips bare small integers, plain years, and digits belonging to identifiers.
+- **Skim** — per-section gist (first sentences), word count, and key numbers.
+
+`SetShell` picks its tab set from the set id: `paper-` sets get Notes / Data / Claims / Find / Skim, everything else keeps the study modes. `components/Inline.tsx` turns DOIs, PMIDs, PMC ids, and bare URLs written as plain text into links, so existing sets gain clickable identifiers without being re-imported.
+
 ## Sync
 
 Sync is optional and lazy: `src/lib/cloud.ts` (and the Firebase SDK with it) is `import()`ed only when the user enables Sync or has it enabled from a previous session (`recall.sync.on` flag).
