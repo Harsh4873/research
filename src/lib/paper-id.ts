@@ -39,6 +39,42 @@ export function parsePaperId(input: string): PaperId | null {
   return null;
 }
 
+/**
+ * Pull every identifier out of free text — a reference list, an EndNote
+ * export, a pasted column of numbers.
+ *
+ * Bare numbers are matched far more strictly here than in `parsePaperId`:
+ * reference lists are full of years, volumes, and page numbers, so only
+ * 7–8 digit numbers (the modern PMID range) count when there is no label.
+ */
+export function parsePaperIds(text: string): PaperId[] {
+  const found = new Map<string, PaperId>();
+  const add = (id: PaperId) => {
+    const key = `${id.kind}:${id.value.toLowerCase()}`;
+    if (!found.has(key)) found.set(key, id);
+  };
+
+  let rest = text;
+  const consume = (re: RegExp, handle: (match: RegExpExecArray) => void) => {
+    rest = rest.replace(re, (...args) => {
+      const match = args.slice(0, -2) as unknown as RegExpExecArray;
+      handle(match);
+      return ' '.repeat(String(match[0]).length);
+    });
+  };
+
+  // Most specific first; each match is blanked so later passes cannot
+  // rediscover its digits as a PMID.
+  consume(/\bPMC\s?(\d+)\b/gi, (m) => add({ kind: 'pmcid', value: normalizePmcid(m[1]) }));
+  consume(/\b(10\.\d{4,9}\/[^\s,;"'<>()[\]]+)/g, (m) =>
+    add({ kind: 'doi', value: m[1].replace(/[.,;)]+$/, '') }),
+  );
+  consume(/\bPMID\s*[:#]?\s*(\d{1,9})\b/gi, (m) => add({ kind: 'pmid', value: m[1] }));
+  consume(/\b(\d{7,8})\b/g, (m) => add({ kind: 'pmid', value: m[1] }));
+
+  return [...found.values()];
+}
+
 export function normalizePmcid(value: string): string {
   const digits = value.replace(/[^0-9]/g, '');
   return digits ? `PMC${digits}` : value.toUpperCase();
