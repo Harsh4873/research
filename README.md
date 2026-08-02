@@ -1,11 +1,11 @@
-# Recall
+# Research
 
-Recall is the owner's personal study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. The landing page offers two ways in:
+Research is the owner's personal reading and study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. It has two halves:
 
-- **Recall** — paste or upload Markdown notes and turn them into study material.
-- **Review** — give it a PMID, PMCID, DOI, or a PDF; it rebuilds the paper as sectioned Markdown for fast reading.
+- **Recall** — paste or upload Markdown notes and turn them into study material: flashcards, quizzes, fill-in-the-blanks, and a matching game.
+- **Review** — give it a PMID, PMCID, DOI, or a PDF and read the paper fast: notes, data, claims, find, and skim.
 
-Recall produces flashcards, quizzes, fill-in-the-blanks, and matching games. Review is a reading workspace: notes, data, claims, find, and skim. Both share the same clean reading view with read-aloud, and turning on Sync keeps everything on every signed-in device (phone and laptop).
+Both share the same clean reading view with read-aloud, and turning on Sync keeps everything on every signed-in device (phone and laptop).
 
 ## Review: read papers fast
 

@@ -268,7 +268,7 @@ function NoteComposer({ onAdd }: { onAdd: (note: string) => void }) {
       />
       <div className="note-composer-footer">
         <span className="speech-status" aria-live="polite">
-          {speech.listening ? <><i /> Listening… speak naturally.</> : speech.error ?? (speech.supported ? 'Voice is handled by your browser’s speech service and is not stored by Recall.' : 'Dictation is not supported in this browser.')}
+          {speech.listening ? <><i /> Listening… speak naturally.</> : speech.error ?? (speech.supported ? 'Voice is handled by your browser’s speech service and is not stored by Research.' : 'Dictation is not supported in this browser.')}
         </span>
         <button type="button" className="btn btn-primary btn-sm" disabled={!body.trim()} onClick={submit}>
           <Plus size={15} aria-hidden /> Add note

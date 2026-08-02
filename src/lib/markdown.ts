@@ -1,4 +1,5 @@
 import type { Block, HeadingBlock, Inline, ListBlock, ListItem, ParsedDoc } from '../model';
+import { normalizeHtmlInMarkdown } from './html-text';
 
 const HEADING_RE = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const HR_RE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/;
@@ -158,7 +159,9 @@ class Slugger {
 
 /** Parse a markdown document into a typed block model. */
 export function parseMarkdown(source: string): ParsedDoc {
-  const lines = source.replace(/\r\n?/g, '\n').split('\n');
+  // Text pasted from a journal page, and PubMed's structured abstracts, carry
+  // real HTML. Convert it here so already-saved documents render correctly.
+  const lines = normalizeHtmlInMarkdown(source.replace(/\r\n?/g, '\n')).split('\n');
   const slugger = new Slugger();
   let start = 0;
   let title: string | undefined;

@@ -1,7 +1,7 @@
 {
-  "name": "Recall — Study your notes",
-  "short_name": "Recall",
-  "description": "Turn markdown notes into flashcards, quizzes, fill-in-the-blanks, and a matching game. Everything stays on your device.",
+  "name": "Research — Read papers, study notes",
+  "short_name": "Research",
+  "description": "Read research papers and study your own notes. Everything stays on your device.",
   "id": "/research/",
   "start_url": "/research/",
   "scope": "/research/",
