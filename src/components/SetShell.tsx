@@ -25,6 +25,8 @@ interface SetShellProps {
   mode: Mode;
   onNavigate: (mode: Mode) => void;
   onBack: () => void;
+  /** Where the back link returns to — the Recall library or the Review list. */
+  backLabel?: string;
   onAnswer: (cardId: string, correct: boolean) => void;
   onToggleStar: (cardId: string) => void;
   onBestTime: (ms: number) => void;
@@ -43,7 +45,7 @@ const TABS: { mode: Mode; label: string; icon: typeof BookOpen }[] = [
 ];
 
 export function SetShell(props: SetShellProps) {
-  const { set, material, progress, mode, onNavigate, onBack } = props;
+  const { set, material, progress, mode, onNavigate, onBack, backLabel = 'Library' } = props;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(set.markdown);
 
@@ -54,7 +56,7 @@ export function SetShell(props: SetShellProps) {
     <div className="set-shell fade-in">
       <div className="set-header">
         <button type="button" className="btn btn-ghost btn-sm back-link" onClick={onBack}>
-          <ArrowLeft size={16} aria-hidden /> Library
+          <ArrowLeft size={16} aria-hidden /> {backLabel}
         </button>
         <div className="set-header-row">
           <h1 className="set-title">{set.title}</h1>

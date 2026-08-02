@@ -19,6 +19,33 @@ const MAX_SECTION_CARDS = 24;
 const SEPARATOR_RE = /^\s*(?:[:：]|[—–―]|::|[-=]{1,2})\s*/;
 const DEFINITION_CONNECTOR_RE = /^\s*(?:is|are|means?|refers? to|describes?|represents?|equals?|=)\s+/i;
 const IMPLICIT_DEFINITION_RE = /^\s*(?:an?\s+|the\s+|how\s+|whether\s+|probability\b|ratio\b)/i;
+function bareHeading(section: string): string {
+  return section.replace(/^\d+(?:\.\d+)*[.)]?\s*/, '').trim();
+}
+
+/**
+ * Sections that are publishing apparatus rather than subject matter. Mining
+ * them yields cards about citations and funding statements, not the material.
+ */
+const NON_STUDY_SECTION_RE =
+  /^(?:references?|bibliography|literature cited|works cited|acknowledgements?|acknowledgments?|funding(?: statement| information)?|competing interests?|conflicts? of interest|author contributions?|declarations?|data availability(?: statement)?|code availability|ethics(?: statement| approval)?)$/i;
+
+/** No cards of any kind come from these sections. */
+export function isNonStudySection(section: string): boolean {
+  return NON_STUDY_SECTION_RE.test(bareHeading(section));
+}
+
+/**
+ * Sections whose *contents* are worth studying but whose heading makes a poor
+ * question — a glossary's entries are cards, "What is the key idea in
+ * Glossary?" is not.
+ */
+const NON_QUESTION_SECTION_RE = /^(?:contents?|glossary|index|abbreviations|supplementary material|supporting information|equations)$/i;
+
+export function isNonQuestionSection(section: string): boolean {
+  return isNonStudySection(section) || NON_QUESTION_SECTION_RE.test(bareHeading(section));
+}
+
 const QUESTION_RE = /^(?:q|question)\s*(?:\d+)?\s*[:.)\-–—]\s*(.+)$/i;
 const ANSWER_RE = /^(?:a|answer)\s*(?:\d+)?\s*[:.)\-–—]\s*(.+)$/i;
 const GENERIC_CLOZE_TARGETS = new Set([
@@ -183,7 +210,7 @@ function sectionCards(doc: ParsedDoc): Array<{ term: string; definition: string;
     const block = doc.blocks[index];
     if (block.type !== 'heading' || block.depth < 2 || block.depth > 3) continue;
     const heading = block.text.replace(/^\d+(?:\.\d+)*[.)]?\s*/, '').trim();
-    if (!heading || /^(?:contents?|glossary|references?)$/i.test(heading)) continue;
+    if (!heading || isNonQuestionSection(heading)) continue;
     const definition = firstSectionAnswer(doc.blocks, index, block.depth);
     if (!definition) continue;
     cards.push({ term: questionFromHeading(heading), definition, section: heading });
@@ -239,6 +266,7 @@ export function extractStudyMaterial(markdown: string): StudyMaterial {
   const defUnitTexts = new Set<string>();
   for (let i = 0; i < units.length; i++) {
     const unit = units[i];
+    if (isNonStudySection(unit.section)) continue;
     const q = unit.text.match(QUESTION_RE);
     if (q) {
       // "Q: ...? A: ..." on adjacent lines gets merged into one paragraph.
@@ -272,7 +300,7 @@ export function extractStudyMaterial(markdown: string): StudyMaterial {
 
   // 2) Tables: first column is the term, remaining columns the definition.
   for (const { block, section } of tables) {
-    if (block.header.length < 2) continue;
+    if (block.header.length < 2 || isNonStudySection(section)) continue;
     for (const row of block.rows) {
       const term = row[0]?.trim() ?? '';
       const rest = row.slice(1).filter((cell) => cell.trim());
@@ -322,7 +350,7 @@ export function extractStudyMaterial(markdown: string): StudyMaterial {
   };
 
   for (const unit of units) {
-    if (defUnitTexts.has(unit.text)) continue;
+    if (defUnitTexts.has(unit.text) || isNonStudySection(unit.section)) continue;
     const boldSpans = unit.inlines.filter((r) => r.kind === 'bold').map((r) => r.text.trim());
     for (const sentence of sentencesOf(unit.text)) {
       const bold = boldSpans

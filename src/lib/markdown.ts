@@ -162,6 +162,7 @@ export function parseMarkdown(source: string): ParsedDoc {
   const slugger = new Slugger();
   let start = 0;
   let title: string | undefined;
+  let meta: Record<string, string> | undefined;
 
   if (lines[0]?.trim() === '---') {
     let end = -1;
@@ -173,10 +174,15 @@ export function parseMarkdown(source: string): ParsedDoc {
       }
     }
     if (end > 0) {
+      const collected: Record<string, string> = {};
       for (let j = 1; j < end; j++) {
-        const m = lines[j].match(/^title:\s*(.+)$/i);
-        if (m) title = m[1].trim().replace(/^["']|["']$/g, '');
+        const m = lines[j].match(/^([A-Za-z][\w-]*):\s*(.*)$/);
+        if (!m) continue;
+        const value = m[2].trim().replace(/^["']|["']$/g, '');
+        if (value) collected[m[1].toLowerCase()] = value;
       }
+      if (collected.title) title = collected.title;
+      if (Object.keys(collected).length > 0) meta = collected;
       start = end + 1;
     }
   }
@@ -186,7 +192,7 @@ export function parseMarkdown(source: string): ParsedDoc {
     const h1 = blocks.find((b): b is HeadingBlock => b.type === 'heading' && b.depth === 1);
     if (h1) title = h1.text;
   }
-  return { title, blocks };
+  return { title, meta, blocks };
 }
 
 function parseBlocks(lines: string[], slugger: Slugger): Block[] {

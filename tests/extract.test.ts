@@ -147,3 +147,56 @@ describe('ids and keys', () => {
     expect(normalizeKey('  Émile — Zola!! ')).toBe('emile zola');
   });
 });
+
+describe('sections that should not become cards', () => {
+  const md = [
+    '# Paper',
+    '',
+    '## Methods',
+    '',
+    'We used a **chemostat** to hold the culture at a steady density for many hours.',
+    '',
+    '## Glossary',
+    '',
+    '- **OD**: optical density',
+    '- **CFU**: colony forming unit',
+    '',
+    '## Acknowledgements',
+    '',
+    'We thank the Wilson lab for the strains and the reviewers for their comments on the manuscript.',
+    '',
+    '## References',
+    '',
+    '1. Klein A. Human triallelic sites: evidence for a new mechanism. Genetics. 2001.',
+    '2. Ng B. Another growth study of interest. Journal of Testing. 2005.',
+    '',
+  ].join('\n');
+  const material = extractStudyMaterial(md);
+
+  it('still mines glossary entries, which are prime study material', () => {
+    const terms = new Map(material.terms.map((t) => [t.term, t.definition]));
+    expect(terms.get('OD')).toBe('optical density');
+    expect(terms.get('CFU')).toBe('colony forming unit');
+  });
+
+  it('never turns reference entries into cards', () => {
+    const text = material.terms.map((t) => `${t.term} ${t.definition}`).join(' ');
+    expect(text).not.toContain('Human triallelic sites');
+    expect(text).not.toContain('Journal of Testing');
+    expect(material.clozes.some((c) => c.section === 'References')).toBe(false);
+  });
+
+  it('skips acknowledgements and funding prose', () => {
+    expect(material.terms.some((t) => t.section === 'Acknowledgements')).toBe(false);
+    expect(material.clozes.some((c) => c.section === 'Acknowledgements')).toBe(false);
+  });
+
+  it('asks no "key idea" question about a glossary or contents heading', () => {
+    expect(material.terms.some((t) => /Glossary/i.test(t.term))).toBe(false);
+    expect(material.terms.some((t) => /References/i.test(t.term))).toBe(false);
+  });
+
+  it('still studies the real sections', () => {
+    expect(material.terms.some((t) => t.section === 'Methods')).toBe(true);
+  });
+});

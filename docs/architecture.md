@@ -26,6 +26,27 @@ Study material is always **derived** from the stored markdown at load time (memo
 - `src/App.tsx` — hash router (`#/`, `#/set/<id>/<mode>`) so deep links work on GitHub Pages without a SPA fallback.
 - `public/sw.js` — cache-first app-shell service worker; its activate step also deletes caches left behind by the previous app that lived at this scope.
 
+## Review (papers → markdown)
+
+Review reuses the whole study pipeline; it only adds a front end that produces markdown from a paper. A Review paper is an ordinary `StudySet` whose id carries a `paper-` prefix (`src/lib/paper-set.ts`), so it syncs, exports, and studies with no schema or rules change. Paper metadata rides in YAML front matter, which `parseMarkdown` now returns as `meta`.
+
+```
+PMID / PMCID / DOI ─→ lib/paper-id.ts     parse and normalise the identifier
+                   ─→ lib/europepmc.ts    Europe PMC metadata, then full text;
+                                          NCBI E-utilities as metadata fallback
+                   ─→ lib/jats.ts         JATS XML → sectioned study markdown
+PDF file           ─→ lib/pdf-import.ts   PDF.js text runs (lazy-loaded)
+                   ─→ lib/pdf-layout.ts   lines, columns, headings, tables → markdown
+                                        ↓
+                              the same extract → questions pipeline
+```
+
+- `src/lib/xml.ts` — a small dependency-free well-formed-XML parser, so JATS parsing behaves identically in the browser and in Node tests without a DOM implementation.
+- `src/lib/jats.ts` — the converter. Floats render in place under level-4 headings so they stay navigable without becoming section questions; reference lists are collected once from anywhere in the article; equations published only as images are counted and explained rather than stamped as empty placeholders; licences are normalised to short labels (`CC BY-NC`).
+- `src/lib/pdf-layout.ts` — pure layout reconstruction (spans → lines → cells → blocks) so every heuristic is unit-tested without a PDF engine. `pdf-import.ts` is the thin PDF.js bridge and uses the **legacy** build, because the modern one calls platform APIs (`Math.sumPrecise`, `Map.getOrInsertComputed`) that most shipping browsers lack.
+- Markdown is shaped for the extractor: glossary bullets and two-column tables become term cards, prose sections become recall prompts, and citation/keyword lines are deliberately written without bold or `Term: value` shapes so they cannot turn into junk cards.
+- `extract.ts` skips publishing apparatus (references, acknowledgements, funding, conflicts) entirely, and skips section-question generation for headings that make poor questions (glossary, contents, supplementary material) while still mining their contents.
+
 ## Sync
 
 Sync is optional and lazy: `src/lib/cloud.ts` (and the Firebase SDK with it) is `import()`ed only when the user enables Sync or has it enabled from a previous session (`recall.sync.on` flag).
