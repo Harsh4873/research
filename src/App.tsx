@@ -5,6 +5,7 @@ import { MODES } from './model';
 import type { CloudEngine } from './lib/cloud';
 import { extractStudyMaterial } from './lib/extract';
 import { parseMarkdown } from './lib/markdown';
+import { normalizeHtmlInMarkdown } from './lib/html-text';
 import {
   createSet,
   deleteSet,
@@ -26,10 +27,10 @@ import { SyncMenu } from './components/SyncMenu';
 import { Landing } from './components/Landing';
 import { ReviewView, type BulkOutcome, type PaperDraft } from './components/ReviewView';
 import { createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
+import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
 
 /** A reference list can be long; keep one paste from running away. */
 const MAX_BULK_LOOKUPS = 120;
-import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
 
 const SYNC_FLAG_KEY = 'recall.sync.on';
 
@@ -163,12 +164,14 @@ export default function App() {
           errors.push('Nothing to import — the file was empty.');
           continue;
         }
+        // Text copied from a web page carries HTML; store it as markdown.
+        markdown = normalizeHtmlInMarkdown(markdown);
         const docTitle = parseMarkdown(markdown).title;
         const set = createSet(title || docTitle || 'Untitled set', markdown, Date.now() + created.length);
         next = upsertSet(next, set);
         created.push(set);
       } catch {
-        errors.push(item.title ? `“${item.title}” is not a valid Recall export.` : 'That JSON is not a valid Recall export.');
+        errors.push(item.title ? `“${item.title}” is not a valid Research export.` : 'That JSON is not a valid Research export.');
       }
     }
     setData(next);
@@ -328,7 +331,7 @@ export default function App() {
             <span className="brand-badge">
               <GraduationCap size={18} aria-hidden />
             </span>
-            Recall
+            Research
           </button>
           <nav className="header-nav" aria-label="Sections">
             <button
@@ -415,7 +418,7 @@ export default function App() {
       </main>
 
       <footer className="app-footer">
-        Study sets are generated locally from your markdown. Dictation uses your browser’s speech service; Recall
+        Study sets are generated locally from your markdown. Dictation uses your browser’s speech service; Research
         never stores the audio. Turn on Sync only when you want sets and progress on all your devices.
       </footer>
     </div>

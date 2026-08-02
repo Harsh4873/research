@@ -1,5 +1,6 @@
 import { europePmcQuery, normalizePmcid, type PaperId } from './paper-id';
 import { buildFrontMatter, citationLine, jatsToMarkdown, mineAbbreviations, type PaperConversion, type PaperMeta } from './jats';
+import { htmlToMarkdown, structuredAbstractParts } from './html-text';
 
 const EPMC = 'https://www.ebi.ac.uk/europepmc/webservices/rest';
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
@@ -121,25 +122,14 @@ export function abstractOnlyMarkdown(meta: PaperMeta, abstractText: string | und
   ];
   if (meta.keywords.length > 0) out.push(`_This paper is indexed under ${meta.keywords.join(', ')}._`);
 
-  const clean = (abstractText ?? '').replace(/\s+/g, ' ').trim();
+  const raw = (abstractText ?? '').trim();
+  // PubMed structured abstracts arrive as HTML (`<h4>Background</h4>…`).
+  const clean = raw ? htmlToMarkdown(raw).replace(/\s+/g, ' ').trim() : '';
   if (clean) {
     out.push('## Abstract');
-    // Structured abstracts use "BACKGROUND: ..." run-in headings; split them
-    // into labelled bullets so they become study cards.
-    const structured = clean.match(/([A-Z][A-Z /&-]{3,40}):\s/g);
-    if (structured && structured.length >= 2) {
-      const parts = clean.split(/(?=[A-Z][A-Z /&-]{3,40}:\s)/).filter(Boolean);
-      for (const part of parts) {
-        const match = part.match(/^([A-Z][A-Z /&-]{3,40}):\s*([\s\S]+)$/);
-        if (match) {
-          const label = match[1].trim().replace(/\s+/g, ' ');
-          const body = match[2].replace(/\s+/g, ' ').trim();
-          const pretty = label.charAt(0) + label.slice(1).toLowerCase();
-          out.push(`- **${pretty}**: ${body}`);
-        } else {
-          out.push(part.trim());
-        }
-      }
+    const parts = structuredAbstractParts(raw);
+    if (parts.length >= 2) {
+      for (const part of parts) out.push(`- **${part.label}**: ${part.body.replace(/\s+/g, ' ')}`);
     } else {
       out.push(clean);
     }

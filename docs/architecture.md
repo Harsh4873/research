@@ -1,6 +1,6 @@
 # Architecture
 
-Recall is a client-side React + Vite single-page app; the deployed site is static files on GitHub Pages served under `/research/`. There is no app server. The only runtime network I/O is the optional Firebase sync (Google auth + Firestore), which stays completely unloaded until the user turns Sync on.
+Research is a client-side React + Vite single-page app (Recall for notes, Review for papers); the deployed site is static files on GitHub Pages served under `/research/`. There is no app server. The only runtime network I/O is the optional Firebase sync (Google auth + Firestore), which stays completely unloaded until the user turns Sync on.
 
 ## Pipeline
 
@@ -61,6 +61,13 @@ PDF file           ─→ lib/pdf-import.ts   PDF.js text runs (lazy-loaded)
 - **Skim** — per-section gist (first sentences), word count, and key numbers.
 
 `SetShell` picks its tab set from the set id: `paper-` sets get Notes / Data / Claims / Find / Skim, everything else keeps the study modes. `components/Inline.tsx` turns DOIs, PMIDs, PMC ids, and bare URLs written as plain text into links, so existing sets gain clickable identifiers without being re-imported.
+
+## Naming
+
+The app is **Research**; Recall and Review are its two halves. Only the visible
+naming changed: the persisted keys (`recall.data.v1`, `recall.sync.on`) and the
+Firestore collection (`recall_users`) keep their original names, because
+renaming them would orphan saved data and break the deployed security rules.
 
 ## Sync
 
