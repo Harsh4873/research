@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -14,10 +14,12 @@ import {
   Table2,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import type { AppData, StudyMaterial, StudySet } from '../model';
 import { masteryPercent } from '../lib/store';
 import { isPaperSet, paperFrontMatter, paperSubtitle } from '../lib/paper-set';
+import { findExistingPaper, searchPapers } from '../lib/paper-search';
 import { parsePaperIds } from '../lib/paper-id';
 import { isReferenceFile } from '../lib/reference-file';
 import { copyText } from '../lib/clipboard';
@@ -52,7 +54,8 @@ type Phase =
   | { kind: 'working'; status: string }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; draft: PaperDraft }
-  | { kind: 'bulk'; outcome: BulkOutcome };
+  | { kind: 'bulk'; outcome: BulkOutcome }
+  | { kind: 'have'; set: StudySet };
 
 const EXAMPLES = [
   { label: 'PMID 23193287', value: '23193287' },
@@ -63,6 +66,7 @@ const EXAMPLES = [
 export function ReviewView(props: ReviewViewProps) {
   const { data, materialFor } = props;
   const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [dragOver, setDragOver] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -71,6 +75,7 @@ export function ReviewView(props: ReviewViewProps) {
   const papers = data.sets.filter((set) => isPaperSet(set.id));
   const busy = phase.kind === 'working';
   const pendingCount = query.trim() ? parsePaperIds(query).length : 0;
+  const matches = useMemo(() => searchPapers(data.sets, filter), [data.sets, filter]);
 
   const run = async (task: (onStatus: (status: string) => void) => Promise<Phase>) => {
     setPhase({ kind: 'working', status: 'Starting…' });
@@ -95,6 +100,14 @@ export function ReviewView(props: ReviewViewProps) {
   /** One identifier opens a preview; a list is fetched in bulk. */
   const importText = (text: string) => {
     const ids = parsePaperIds(text);
+    // Looking up something already saved should open it, not fetch it again.
+    if (ids.length === 1) {
+      const existing = findExistingPaper(data.sets, ids[0]);
+      if (existing) {
+        setPhase({ kind: 'have', set: existing });
+        return;
+      }
+    }
     if (ids.length === 0) {
       setPhase({
         kind: 'error',
@@ -256,6 +269,34 @@ export function ReviewView(props: ReviewViewProps) {
           </div>
         )}
 
+        {phase.kind === 'have' && (
+          <div className="review-result fade-in">
+            <div className="review-result-head">
+              <div>
+                <h2 className="review-result-title">{phase.set.title}</h2>
+                <p className="review-result-meta">{paperSubtitle(paperFrontMatter(phase.set.markdown))}</p>
+              </div>
+              <span className="review-badge review-badge-have">Already saved</span>
+            </div>
+            <p className="review-note">This paper is already in your library, so there was nothing to fetch.</p>
+            <div className="review-result-actions">
+              <button type="button" className="btn btn-primary" onClick={() => props.onOpen(phase.set)}>
+                Open it <ArrowRight size={16} aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setPhase({ kind: 'idle' });
+                  setQuery('');
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {phase.kind === 'bulk' && (
           <div className="review-result fade-in">
             <div className="review-result-head">
@@ -381,56 +422,109 @@ export function ReviewView(props: ReviewViewProps) {
 
       {papers.length > 0 && (
         <section className="sets-section" aria-label="Your papers">
-          <h2 className="section-title">Your papers</h2>
-          <div className="sets-grid">
-            {papers.map((set) => {
-              const material = materialFor(set);
-              const progress = data.progress[set.id] ?? { cards: {} };
-              const ids = [...material.terms.map((t) => t.id), ...material.clozes.map((c) => c.id)];
-              const mastery = masteryPercent(progress, ids);
-              const front = paperFrontMatter(set.markdown);
-              const subtitle = paperSubtitle(front);
-              return (
-                <div key={set.id} className="set-card">
-                  <button type="button" className="set-card-main" onClick={() => props.onOpen(set)}>
-                    <div className="set-card-title">{set.title}</div>
-                    {subtitle && <div className="set-card-sub">{subtitle}</div>}
-                    <div className="set-card-meta">
-                      <span className="meta-chip">{material.stats.terms} terms</span>
-                      <span className="meta-chip">{material.stats.clozes} blanks</span>
-                      <span className="meta-chip">{material.stats.readingMinutes} min</span>
-                    </div>
-                    <div className="mastery-row">
-                      <div className="mastery-bar">
-                        <div className="mastery-fill" style={{ width: `${mastery}%` }} />
-                      </div>
-                      <span className="mastery-num">{mastery}%</span>
-                    </div>
-                  </button>
-                  <div className="set-card-actions">
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => props.onExport(set)}
-                      aria-label={`Export ${set.title}`}
-                      title="Export as JSON"
-                    >
-                      <Download size={16} aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn icon-btn-danger"
-                      onClick={() => props.onDelete(set)}
-                      aria-label={`Remove ${set.title}`}
-                      title="Remove paper"
-                    >
-                      <Trash2 size={16} aria-hidden />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="library-head">
+            <h2 className="section-title">Your papers</h2>
+            <div className="review-search-field library-filter">
+              <Search size={16} aria-hidden />
+              <input
+                className="input"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder="Search your papers — title, author, journal, PMID, DOI, or any word in the text…"
+                aria-label="Search your papers"
+                spellCheck={false}
+              />
+              {filter && (
+                <button type="button" className="find-clear" onClick={() => setFilter('')} aria-label="Clear search">
+                  <X size={15} aria-hidden />
+                </button>
+              )}
+            </div>
+            {filter.trim() && (
+              <p className="find-count">
+                {matches.length} of {papers.length} {papers.length === 1 ? 'paper' : 'papers'}
+              </p>
+            )}
           </div>
+
+          {matches.length === 0 ? (
+            <div className="mode-empty">
+              <p>Nothing in your library matches “{filter.trim()}”.</p>
+              {parsePaperIds(filter).length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    setQuery(filter);
+                    importText(filter);
+                  }}
+                >
+                  Fetch it instead <ArrowRight size={15} aria-hidden />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="sets-grid">
+              {matches.map(({ set, front, fields, snippet }) => {
+                const material = materialFor(set);
+                const progress = data.progress[set.id] ?? { cards: {} };
+                const ids = [...material.terms.map((t) => t.id), ...material.clozes.map((c) => c.id)];
+                const mastery = masteryPercent(progress, ids);
+                const subtitle = paperSubtitle(front);
+                return (
+                  <div key={set.id} className="set-card">
+                    <button type="button" className="set-card-main" onClick={() => props.onOpen(set)}>
+                      <div className="set-card-title">{set.title}</div>
+                      {subtitle && <div className="set-card-sub">{subtitle}</div>}
+                      {front.authors && <div className="set-card-authors">{front.authors}</div>}
+                      {fields.length > 0 && (
+                        <div className="match-fields">
+                          {fields.map((field) => (
+                            <span key={field} className="match-chip">
+                              matched {field}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {snippet && <p className="match-snippet">{snippet}</p>}
+                      <div className="set-card-meta">
+                        <span className="meta-chip">{material.stats.readingMinutes} min</span>
+                        {material.stats.terms > 0 && <span className="meta-chip">{material.stats.terms} terms</span>}
+                      </div>
+                      {mastery > 0 && (
+                        <div className="mastery-row">
+                          <div className="mastery-bar">
+                            <div className="mastery-fill" style={{ width: `${mastery}%` }} />
+                          </div>
+                          <span className="mastery-num">{mastery}%</span>
+                        </div>
+                      )}
+                    </button>
+                    <div className="set-card-actions">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => props.onExport(set)}
+                        aria-label={`Export ${set.title}`}
+                        title="Export as JSON"
+                      >
+                        <Download size={16} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn icon-btn-danger"
+                        onClick={() => props.onDelete(set)}
+                        aria-label={`Remove ${set.title}`}
+                        title="Remove paper"
+                      >
+                        <Trash2 size={16} aria-hidden />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
     </div>

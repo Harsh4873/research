@@ -10,6 +10,7 @@ Recall produces flashcards, quizzes, fill-in-the-blanks, and matching games. Rev
 ## Review: read papers fast
 
 - Accepts a bare PMID, a PMCID, a DOI, or a pasted PubMed / PMC / Europe PMC / doi.org URL.
+- **Search your library**: the saved papers list filters as you type — by title, author, journal, year, PMID, PMCID, DOI, or any word in the paper's text (body matches show a snippet). Looking up an identifier you already saved offers to open it instead of fetching it again.
 - **Bulk import**: paste a whole reference list, or drop a `.docx` / `.txt` / `.csv` / `.ris` of one. Every PMID, PMCID, and DOI in it is fetched, and the copies of a paper cited three different ways collapse into one set.
 - Fetches open-access full text from Europe PMC as JATS XML and converts it to Markdown: sectioned headings, structured abstract, GFM tables with captions and footnotes, equations (LaTeX and MathML), figure captions, supplementary material, glossary, and references.
 - Falls back to the PubMed abstract (via Europe PMC, then NCBI E-utilities) when a paper is not open access, and says so plainly.
