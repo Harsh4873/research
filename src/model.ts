@@ -154,8 +154,13 @@ export interface SyncStatus {
   error?: string;
 }
 
-export const MODES = ['notes', 'cards', 'quiz', 'blanks', 'match'] as const;
+/** Recall studies a set; Review reads a paper. Each has its own tabs. */
+export const STUDY_MODES = ['notes', 'cards', 'quiz', 'blanks', 'match'] as const;
+export const PAPER_MODES = ['notes', 'data', 'claims', 'find', 'skim'] as const;
+export const MODES = ['notes', 'cards', 'quiz', 'blanks', 'match', 'data', 'claims', 'find', 'skim'] as const;
 export type Mode = (typeof MODES)[number];
+export type StudyMode = (typeof STUDY_MODES)[number];
+export type PaperMode = (typeof PAPER_MODES)[number];
 
 export function emptyCardProgress(): CardProgress {
   return { box: 0, seen: 0, correct: 0, wrong: 0, starred: false, last: 0 };

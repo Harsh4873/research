@@ -3,19 +3,25 @@
 Recall is the owner's personal study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. The landing page offers two ways in:
 
 - **Recall** — paste or upload Markdown notes and turn them into study material.
-- **Review** — give it a PMID, PMCID, DOI, or a PDF; it rebuilds the paper as sectioned Markdown and studies it with the same engine.
+- **Review** — give it a PMID, PMCID, DOI, or a PDF; it rebuilds the paper as sectioned Markdown for fast reading.
 
-Either route produces flashcards, quizzes, fill-in-the-blanks, matching games, and a clean reading view with read-aloud. Turning on Sync keeps the same sets and progress on every signed-in device (phone and laptop).
+Recall produces flashcards, quizzes, fill-in-the-blanks, and matching games. Review is a reading workspace: notes, data, claims, find, and skim. Both share the same clean reading view with read-aloud, and turning on Sync keeps everything on every signed-in device (phone and laptop).
 
-## Review: papers into study sets
+## Review: read papers fast
 
 - Accepts a bare PMID, a PMCID, a DOI, or a pasted PubMed / PMC / Europe PMC / doi.org URL.
 - **Bulk import**: paste a whole reference list, or drop a `.docx` / `.txt` / `.csv` / `.ris` of one. Every PMID, PMCID, and DOI in it is fetched, and the copies of a paper cited three different ways collapse into one set.
 - Fetches open-access full text from Europe PMC as JATS XML and converts it to Markdown: sectioned headings, structured abstract, GFM tables with captions and footnotes, equations (LaTeX and MathML), figure captions, supplementary material, glossary, and references.
 - Falls back to the PubMed abstract (via Europe PMC, then NCBI E-utilities) when a paper is not open access, and says so plainly.
 - **PDF upload** for anything paywalled: the file is parsed on the device with PDF.js — column-aware line reconstruction, heading detection, running-head removal, table and equation heuristics, and caption capture. Nothing is uploaded.
-- Mines an abbreviations glossary from the prose, so `Operational taxonomic unit (OTU)` becomes a flashcard.
-- Every paper is an ordinary study set: it syncs, exports, and studies exactly like a note set.
+- Mines an abbreviations glossary from the prose, so `Operational taxonomic unit (OTU)` is defined for you.
+- Review is for **reading**, not drilling. A paper opens with its own tabs:
+  - **Notes** — the whole paper as clean markdown, with every DOI, PMID, and PMC id clickable.
+  - **Data** — every supplementary file (linked straight to its download), table, figure caption, equation, and data-availability statement in one place.
+  - **Claims** — the sentences where the authors say what they found, filtered by findings / conclusions / quantified results.
+  - **Find** — instant search across the paper, plus a Numbers mode listing every effect size, p-value, percentage, and count with its sentence.
+  - **Skim** — the headline claims, then a section-by-section gist with each section's key numbers.
+- Papers still sync and export like any other set; Recall keeps the flashcards, quiz, blanks, and match.
 
 All lookups use free, key-less public APIs (Europe PMC and NCBI E-utilities) straight from the browser; there is no backend.
 
