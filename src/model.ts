@@ -152,6 +152,8 @@ export interface SyncStatus {
   state: SyncState;
   email?: string;
   error?: string;
+  /** Set when the error is fixable by signing in with a different Google account. */
+  wrongAccount?: boolean;
 }
 
 /** Recall studies a set; Review reads a paper. Each has its own tabs. */

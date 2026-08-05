@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Cloud, CloudAlert, CloudOff, LogOut, RefreshCw } from 'lucide-react';
+import { Cloud, CloudAlert, CloudOff, LogOut, RefreshCw, UserRoundCog } from 'lucide-react';
 import type { SyncStatus } from '../model';
 
 interface SyncMenuProps {
   status: SyncStatus;
   onEnable: () => void;
   onSignOut: () => void;
+  onSwitchAccount: () => void;
 }
 
-export function SyncMenu({ status, onEnable, onSignOut }: SyncMenuProps) {
+export function SyncMenu({ status, onEnable, onSignOut, onSwitchAccount }: SyncMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +54,19 @@ export function SyncMenu({ status, onEnable, onSignOut }: SyncMenuProps) {
             <p className="sync-note">Sets and progress sync to your private Firebase account across devices.</p>
           )}
           <div className="sync-pop-actions">
-            {status.state === 'error' && (
+            {status.wrongAccount && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setOpen(false);
+                  onSwitchAccount();
+                }}
+              >
+                <UserRoundCog size={14} aria-hidden /> Switch account
+              </button>
+            )}
+            {status.state === 'error' && !status.wrongAccount && (
               <button
                 type="button"
                 className="btn btn-sm"
