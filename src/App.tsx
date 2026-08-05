@@ -99,6 +99,12 @@ export default function App() {
     await engine.signIn();
   };
 
+  const switchSyncAccount = async () => {
+    setSyncFlag(true);
+    const engine = await bootCloud();
+    await engine.switchAccount();
+  };
+
   const disableSync = async () => {
     setSyncFlag(false);
     setSyncStatus({ state: 'off' });
@@ -350,7 +356,12 @@ export default function App() {
             </button>
           </nav>
           <div className="header-actions">
-            <SyncMenu status={syncStatus} onEnable={() => void enableSync()} onSignOut={() => void disableSync()} />
+            <SyncMenu
+              status={syncStatus}
+              onEnable={() => void enableSync()}
+              onSignOut={() => void disableSync()}
+              onSwitchAccount={() => void switchSyncAccount()}
+            />
             <button
               type="button"
               className="btn btn-ghost btn-sm"

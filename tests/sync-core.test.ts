@@ -4,6 +4,7 @@ import { defaultData, recordAnswer, toggleStar } from '../src/lib/store';
 import {
   applyRemoteProgress,
   applyRemoteSets,
+  checkSyncAccount,
   emptyRemoteIndex,
   planPush,
   progressStamp,
@@ -191,5 +192,27 @@ describe('remote document builders', () => {
     p = recordAnswer(p, 'c', false, 200);
     expect(progressStamp(p)).toBe(300);
     expect(progressStamp({ cards: {} })).toBe(0);
+  });
+});
+
+describe('checkSyncAccount', () => {
+  const owner = 'owner@example.test';
+
+  it('accepts the owner account, ignoring case and stray spacing', () => {
+    expect(checkSyncAccount(owner, owner).ok).toBe(true);
+    expect(checkSyncAccount(' Owner@Example.Test ', owner).ok).toBe(true);
+  });
+
+  it('rejects a different Google account and names both addresses', () => {
+    const check = checkSyncAccount('someone@school.test', owner);
+    expect(check.ok).toBe(false);
+    expect(check.problem).toBe('wrong-account');
+    expect(check.message).toContain('someone@school.test');
+    expect(check.message).toContain(owner);
+  });
+
+  it('rejects an account with no email at all', () => {
+    expect(checkSyncAccount(null, owner)).toMatchObject({ ok: false, problem: 'missing-email' });
+    expect(checkSyncAccount('   ', owner).problem).toBe('missing-email');
   });
 });

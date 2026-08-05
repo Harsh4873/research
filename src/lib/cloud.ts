@@ -13,11 +13,12 @@ import {
   setDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { authPersistenceReady, firebaseAuth, googleProvider, recallFirestore } from '../firebase';
+import { OWNER_EMAIL, authPersistenceReady, firebaseAuth, googleProvider, recallFirestore } from '../firebase';
 import type { AppData, SyncStatus } from '../model';
 import {
   applyRemoteProgress,
   applyRemoteSets,
+  checkSyncAccount,
   emptyRemoteIndex,
   planPush,
   progressToRemote,
@@ -66,12 +67,26 @@ class CloudEngine {
     await authPersistenceReady.catch(() => undefined);
     await getRedirectResult(firebaseAuth).catch(() => undefined);
     onAuthStateChanged(firebaseAuth, (user) => {
-      this.user = user;
       this.teardownListeners();
       if (!user) {
+        this.user = null;
         this.setStatus({ state: 'off' });
         return;
       }
+      const check = checkSyncAccount(user.email, OWNER_EMAIL);
+      if (!check.ok) {
+        // Stay signed in so the address is visible, but never read, write, or
+        // push under an account whose silo is not this library.
+        this.user = null;
+        this.setStatus({
+          state: 'error',
+          email: user.email ?? undefined,
+          error: check.message,
+          wrongAccount: true,
+        });
+        return;
+      }
+      this.user = user;
       this.listen(user);
     });
   }
@@ -137,11 +152,23 @@ class CloudEngine {
 
   private fail(error: unknown, email?: string) {
     const code = (error as { code?: string })?.code ?? '';
-    const message = code.includes('permission-denied')
-      ? 'Firestore blocked the request — the updated firestore.rules must be deployed to the Firebase project once.'
-      : code.includes('unavailable')
-        ? 'Offline — changes will sync when the connection returns.'
-        : `Sync failed (${code || 'unknown error'}).`;
+    if (code.includes('permission-denied')) {
+      // The account was checked before listening, so a denial here means the
+      // project is still running a ruleset without Recall's block.
+      const check = checkSyncAccount(email, OWNER_EMAIL);
+      this.setStatus({
+        state: 'error',
+        email,
+        error: check.ok
+          ? 'Firestore denied the request. The Recall rules are not live yet — deploy firestore.rules to the Firebase project once (npm run deploy:rules).'
+          : check.message,
+        wrongAccount: !check.ok,
+      });
+      return;
+    }
+    const message = code.includes('unavailable')
+      ? 'Offline — changes will sync when the connection returns.'
+      : `Sync failed (${code || 'unknown error'}).`;
     this.setStatus({ state: 'error', email, error: message });
   }
 
@@ -222,6 +249,14 @@ class CloudEngine {
       }
       this.fail(error);
     }
+  }
+
+  /** Sign out of the wrong account and reopen the Google picker. */
+  async switchAccount(): Promise<void> {
+    this.teardownListeners();
+    this.user = null;
+    await firebaseSignOut(firebaseAuth).catch(() => undefined);
+    await this.signIn();
   }
 
   async signOut(): Promise<void> {

@@ -31,9 +31,17 @@ export const firebaseApp = getApps().find((app) => app.name === APP_NAME)
 export const firebaseAuth = getAuth(firebaseApp);
 export const authPersistenceReady = setPersistence(firebaseAuth, browserLocalPersistence);
 
+/**
+ * The one Google account the shared project's security rules admit. Every
+ * account gets its own `recall_users/{uid}` silo, so signing in with a
+ * different one would not reach these sets even if the rules allowed it —
+ * the app checks this before it opens a Firestore listener and says so.
+ */
+export const OWNER_EMAIL = 'hdav4873@gmail.com';
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
-  login_hint: 'hdav4873@gmail.com',
+  login_hint: OWNER_EMAIL,
   prompt: 'select_account',
 });
 

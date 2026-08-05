@@ -36,6 +36,41 @@ export function emptyRemoteIndex(): RemoteIndex {
   return { sets: new Map(), progress: new Map() };
 }
 
+/** Why sync cannot use the signed-in account, or `null` when it can. */
+export type AccountProblem = 'missing-email' | 'wrong-account';
+
+export interface AccountCheck {
+  ok: boolean;
+  problem?: AccountProblem;
+  message?: string;
+}
+
+/**
+ * Sync is single-account by design: sets live under `recall_users/{uid}`, so a
+ * second Google account would be a second, empty library even if the rules let
+ * it in. Checking the address before opening a listener turns a bare
+ * `permission-denied` into an answer.
+ */
+export function checkSyncAccount(email: string | null | undefined, owner: string): AccountCheck {
+  const signedIn = (email ?? '').trim().toLowerCase();
+  const expected = owner.trim().toLowerCase();
+  if (!signedIn) {
+    return {
+      ok: false,
+      problem: 'missing-email',
+      message: `This Google account has no email address, so sync cannot tell whose sets these are. Sign in as ${owner}.`,
+    };
+  }
+  if (signedIn !== expected) {
+    return {
+      ok: false,
+      problem: 'wrong-account',
+      message: `Signed in as ${email}. Your sets sync under ${owner}, and every account gets its own separate library — switch accounts to sync this device.`,
+    };
+  }
+  return { ok: true };
+}
+
 /** The moment this progress was last touched, derived from its cards. */
 export function progressStamp(progress: SetProgress): number {
   let stamp = 0;
