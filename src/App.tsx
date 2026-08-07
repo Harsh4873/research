@@ -11,13 +11,18 @@ import {
   deleteSet,
   exportSetJson,
   getProgress,
+  hasAccountData,
+  loadAccountData,
   loadData,
   parseSetExport,
+  readActiveAccountId,
   recordAnswer,
+  saveAccountData,
   saveData,
   toggleStar,
   upsertSet,
   withProgress,
+  writeActiveAccountId,
 } from './lib/store';
 import { SAMPLE_MARKDOWN, SAMPLE_TITLE } from './lib/sample';
 import { withBundledSets } from './lib/bundled';
@@ -73,7 +78,12 @@ function navigate(hash: string) {
 }
 
 export default function App() {
-  const [data, setData] = useState<AppData>(() => withBundledSets(loadData()));
+  const activeAccountRef = useRef<string | null>(readActiveAccountId());
+  const [data, setData] = useState<AppData>(() => withBundledSets(
+    activeAccountRef.current ? loadAccountData(activeAccountRef.current) : loadData(),
+  ));
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const [route, setRoute] = useState<Route>(parseHash);
   const [notice, setNotice] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'off' });
@@ -83,6 +93,25 @@ export default function App() {
     const { startCloud } = await import('./lib/cloud');
     const engine = startCloud({
       onStatus: setSyncStatus,
+      onAccount: (uid) => {
+        const previousUid = activeAccountRef.current;
+        if (previousUid === uid) return dataRef.current;
+
+        if (previousUid) {
+          saveAccountData(previousUid, dataRef.current);
+        } else if (!hasAccountData(uid)) {
+          // The first sign-in after this upgrade adopts the legacy local-only
+          // library. Later account switches always load a separate cache.
+          saveAccountData(uid, dataRef.current);
+        }
+
+        const next = withBundledSets(loadAccountData(uid));
+        activeAccountRef.current = uid;
+        writeActiveAccountId(uid);
+        dataRef.current = next;
+        setData(next);
+        return next;
+      },
       onRemote: (fold) => setData((d) => fold(d)),
     });
     cloudRef.current = engine;
@@ -118,7 +147,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    saveData(data);
+    const uid = activeAccountRef.current;
+    if (uid) saveAccountData(uid, data);
+    else saveData(data);
     cloudRef.current?.push(data);
   }, [data]);
 

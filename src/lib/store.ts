@@ -3,6 +3,7 @@ import { emptyCardProgress } from '../model';
 import { hashId } from './extract';
 
 const KEY = 'recall.data.v1';
+const ACTIVE_ACCOUNT_KEY = 'recall.active-account.v1';
 
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -113,6 +114,65 @@ export function loadData(storage: StorageLike = defaultStorage()): AppData {
 export function saveData(data: AppData, storage: StorageLike = defaultStorage()): void {
   try {
     storage.setItem(KEY, JSON.stringify(data));
+  } catch {
+    /* quota exceeded or storage blocked; keep the in-memory copy */
+  }
+}
+
+function accountDataKey(uid: string): string {
+  return `${KEY}.account.${encodeURIComponent(uid)}`;
+}
+
+export function readActiveAccountId(storage: StorageLike = defaultStorage()): string | null {
+  try {
+    return storage.getItem(ACTIVE_ACCOUNT_KEY)?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeActiveAccountId(
+  uid: string,
+  storage: StorageLike = defaultStorage(),
+): void {
+  try {
+    storage.setItem(ACTIVE_ACCOUNT_KEY, uid);
+  } catch {
+    /* storage blocked */
+  }
+}
+
+export function hasAccountData(
+  uid: string,
+  storage: StorageLike = defaultStorage(),
+): boolean {
+  try {
+    return storage.getItem(accountDataKey(uid)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+export function loadAccountData(
+  uid: string,
+  storage: StorageLike = defaultStorage(),
+): AppData {
+  try {
+    const raw = storage.getItem(accountDataKey(uid));
+    if (!raw) return defaultData();
+    return sanitize(JSON.parse(raw));
+  } catch {
+    return defaultData();
+  }
+}
+
+export function saveAccountData(
+  uid: string,
+  data: AppData,
+  storage: StorageLike = defaultStorage(),
+): void {
+  try {
+    storage.setItem(accountDataKey(uid), JSON.stringify(data));
   } catch {
     /* quota exceeded or storage blocked; keep the in-memory copy */
   }

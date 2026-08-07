@@ -5,16 +5,21 @@ import {
   deleteSet,
   exportSetJson,
   getProgress,
+  hasAccountData,
+  loadAccountData,
   loadData,
   masteryPercent,
   memoryStorage,
   parseSetExport,
   recordAnswer,
+  readActiveAccountId,
+  saveAccountData,
   saveData,
   toggleStar,
   upsertSet,
   weakCardIds,
   withProgress,
+  writeActiveAccountId,
 } from '../src/lib/store';
 
 describe('persistence round-trip', () => {
@@ -41,6 +46,22 @@ describe('persistence round-trip', () => {
     const loaded = loadData(storage);
     expect(loaded.sets).toEqual([]);
     expect(loaded.theme).toBe('auto');
+  });
+
+  it('keeps browser-local libraries isolated by account UID', () => {
+    const storage = memoryStorage();
+    const first = upsertSet(defaultData(), createSet('First', '# First', 1));
+    const second = upsertSet(defaultData(), createSet('Second', '# Second', 2));
+
+    saveAccountData('uid-one', first, storage);
+    saveAccountData('uid-two', second, storage);
+    writeActiveAccountId('uid-two', storage);
+
+    expect(hasAccountData('uid-one', storage)).toBe(true);
+    expect(hasAccountData('uid-two', storage)).toBe(true);
+    expect(loadAccountData('uid-one', storage).sets[0].title).toBe('First');
+    expect(loadAccountData('uid-two', storage).sets[0].title).toBe('Second');
+    expect(readActiveAccountId(storage)).toBe('uid-two');
   });
 });
 

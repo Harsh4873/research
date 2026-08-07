@@ -31,6 +31,8 @@ import {
 
 export interface CloudHandlers {
   onStatus: (status: SyncStatus) => void;
+  /** Switch browser-local state to the authenticated account before listening. */
+  onAccount: (uid: string) => AppData;
   /** Fold remote changes into app state; must return same-reference data when nothing changed. */
   onRemote: (fold: (data: AppData) => AppData) => void;
 }
@@ -86,6 +88,7 @@ class CloudEngine {
         });
         return;
       }
+      this.latest = this.handlers.onAccount(user.uid);
       this.user = user;
       this.listen(user);
     });
@@ -249,6 +252,7 @@ class CloudEngine {
   async switchAccount(): Promise<void> {
     this.teardownListeners();
     this.user = null;
+    this.latest = null;
     await firebaseSignOut(firebaseAuth).catch(() => undefined);
     await this.signIn();
   }
