@@ -36,13 +36,13 @@ All lookups use free, key-less public APIs (Europe PMC and NCBI E-utilities) str
 - Study modes: **Notes** (rendered outline + glossary), **Flashcards** (flip, star, self-grade), **Quiz** (multiple choice with distractors), **Blanks** (typed answers with fuzzy matching and hints), and **Match** (timed pairing game).
 - Tracks per-card mastery (learning → almost → mastered) and per-set progress, with a "focus weak cards" filter in every mode.
 - Exports and re-imports sets as JSON.
-- Optional cross-device sync: sets and progress replicate through the shared private Firebase account, with tombstoned deletes and last-writer-wins merging.
+- Optional cross-device sync: sets and progress replicate through a private UID-scoped Firebase workspace, with tombstoned deletes and last-writer-wins merging.
 
 ## Privacy boundary
 
-By default generation and storage run in the browser: notes, generated cards, and progress live in `localStorage` on the device. If the owner starts dictation, speech recognition is provided by the browser and may use its configured speech service; Recall does not store audio. Turning on **Sync** signs in with the owner's Google account and replicates sets and progress to the shared private Firebase project (`recall_users/{uid}/…` in Firestore); the security rules only admit the configured verified Google account. There are no other accounts or analytics.
+By default generation and storage run in the browser: notes, generated cards, and progress live in `localStorage` on the device. If a user starts dictation, speech recognition is provided by the browser and may use its configured speech service; Recall does not store audio. Turning on **Sync** signs in with a verified Google account and replicates sets and progress to that account's private path (`recall_users/{uid}/…` in Firestore). There are no analytics.
 
-Sync is deliberately single-account: every Google account gets its own `recall_users/{uid}` silo, so a second account would be a second, empty library. Signing in with any other account (a school or work Google account, say) stops before Firestore is touched and offers **Switch account** instead of failing with a bare permission error.
+Every Google account gets its own `recall_users/{uid}` silo. The same account sees the same library across browsers and devices; a different account starts with a separate library and cannot access another UID's data.
 
 ## Local development
 
@@ -65,4 +65,4 @@ npm run dev
    npm run deploy:rules             # firebase deploy --only firestore:rules --project pickledgerpro
    ```
 
-   This step needs the owner's Google credentials, so it cannot run in CI or from an agent container. The rules file is the complete ruleset for every app in the project, so keep it identical across the Daymark, Slate, Fare, Notes, and Research repositories — deploying from any of them replaces the project rules. If Sync reports "the Recall rules are not live yet", this is the step that is missing.
+   The rules file is the complete ruleset for every app in the project, so keep it byte-identical across Gym, Daymark, Slate, Fare, Notes, and Research — deploying from any of them replaces the project rules. If Sync reports a permission error, confirm this complete file is the deployed policy.

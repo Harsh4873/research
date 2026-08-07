@@ -196,23 +196,20 @@ describe('remote document builders', () => {
 });
 
 describe('checkSyncAccount', () => {
-  const owner = 'owner@example.test';
-
-  it('accepts the owner account, ignoring case and stray spacing', () => {
-    expect(checkSyncAccount(owner, owner).ok).toBe(true);
-    expect(checkSyncAccount(' Owner@Example.Test ', owner).ok).toBe(true);
+  it('accepts any verified account with an email address', () => {
+    expect(checkSyncAccount('owner@example.test', true).ok).toBe(true);
+    expect(checkSyncAccount(' someone@school.test ', true).ok).toBe(true);
   });
 
-  it('rejects a different Google account and names both addresses', () => {
-    const check = checkSyncAccount('someone@school.test', owner);
+  it('rejects an unverified account and names its address', () => {
+    const check = checkSyncAccount('someone@school.test', false);
     expect(check.ok).toBe(false);
-    expect(check.problem).toBe('wrong-account');
+    expect(check.problem).toBe('unverified-email');
     expect(check.message).toContain('someone@school.test');
-    expect(check.message).toContain(owner);
   });
 
   it('rejects an account with no email at all', () => {
-    expect(checkSyncAccount(null, owner)).toMatchObject({ ok: false, problem: 'missing-email' });
-    expect(checkSyncAccount('   ', owner).problem).toBe('missing-email');
+    expect(checkSyncAccount(null, true)).toMatchObject({ ok: false, problem: 'missing-email' });
+    expect(checkSyncAccount('   ', true).problem).toBe('missing-email');
   });
 });

@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, it } from 'vitest';
 
 const PROJECT_ID = 'demo-research';
 const OWNER_UID = 'recall-owner';
-const ALLOWED_EMAIL = 'hdav4873@gmail.com';
+const TEST_EMAIL = 'user.one@example.com';
 const EMULATOR_ADDRESS = process.env.FIRESTORE_EMULATOR_HOST;
 
 function authorizedContext(
@@ -20,7 +20,7 @@ function authorizedContext(
   overrides: Record<string, unknown> = {},
 ): RulesTestContext {
   return environment.authenticatedContext(uid, {
-    email: ALLOWED_EMAIL,
+    email: TEST_EMAIL,
     email_verified: true,
     firebase: { sign_in_provider: 'google.com' },
     ...overrides,
@@ -101,20 +101,25 @@ describe.skipIf(!EMULATOR_ADDRESS)('recall Firestore security rules', () => {
       await assertFails(setDoc(setDocRef(context), validSet({ updatedAt: 4000 })));
     });
 
-    it('denies other uids, wrong or unverified emails, and signed-out access', async () => {
+    it('allows another verified Google account to use its own UID-scoped workspace', async () => {
+      const secondUid = 'second-recall-user';
+      const secondUser = authorizedContext(env, secondUid, { email: 'someone@example.com' });
+      await assertSucceeds(setDoc(setDocRef(secondUser, secondUid), validSet()));
+      await assertSucceeds(getDoc(setDocRef(secondUser, secondUid)));
+    });
+
+    it('denies other uids, unverified emails, non-Google providers, and signed-out access', async () => {
       const owner = authorizedContext(env);
       await assertSucceeds(setDoc(setDocRef(owner), validSet()));
 
       const otherUid = authorizedContext(env, 'someone-else');
       await assertFails(getDoc(setDocRef(otherUid, OWNER_UID)));
-      const wrongEmail = env.authenticatedContext(OWNER_UID, {
-        email: 'intruder@example.com',
-        email_verified: true,
-        firebase: { sign_in_provider: 'google.com' },
-      });
-      await assertFails(getDoc(setDocRef(wrongEmail)));
       const unverified = authorizedContext(env, OWNER_UID, { email_verified: false });
       await assertFails(getDoc(setDocRef(unverified)));
+      const passwordProvider = authorizedContext(env, OWNER_UID, {
+        firebase: { sign_in_provider: 'password' },
+      });
+      await assertFails(getDoc(setDocRef(passwordProvider)));
       const anonymous = env.unauthenticatedContext();
       await assertFails(getDoc(doc(anonymous.firestore(), 'recall_users', OWNER_UID, 'sets', 'set-1')));
     });

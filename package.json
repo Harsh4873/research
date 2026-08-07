@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "audit:study": "vite-node scripts/audit-study-material.ts",
-    "test": "vitest run",
-    "test:rules": "npx --yes firebase-tools emulators:exec --project demo-research --only firestore \"vitest run tests/firestore.rules.test.ts\"",
+    "test": "vitest run --exclude tests/firestore.rules.test.ts",
+    "test:rules": "npx --yes firebase-tools emulators:exec --project demo-research --only firestore \"vitest run tests/firestore.rules.test.ts --testTimeout=60000\"",
     "deploy:rules": "npx --yes firebase-tools deploy --only firestore:rules --project pickledgerpro",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"

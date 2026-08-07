@@ -37,7 +37,7 @@ export function emptyRemoteIndex(): RemoteIndex {
 }
 
 /** Why sync cannot use the signed-in account, or `null` when it can. */
-export type AccountProblem = 'missing-email' | 'wrong-account';
+export type AccountProblem = 'missing-email' | 'unverified-email';
 
 export interface AccountCheck {
   ok: boolean;
@@ -46,26 +46,27 @@ export interface AccountCheck {
 }
 
 /**
- * Sync is single-account by design: sets live under `recall_users/{uid}`, so a
- * second Google account would be a second, empty library even if the rules let
- * it in. Checking the address before opening a listener turns a bare
- * `permission-denied` into an answer.
+ * Each account owns an independent `recall_users/{uid}` library. Check the
+ * claims needed by the Firestore policy before opening listeners so an invalid
+ * session gets a useful message instead of a bare `permission-denied`.
  */
-export function checkSyncAccount(email: string | null | undefined, owner: string): AccountCheck {
-  const signedIn = (email ?? '').trim().toLowerCase();
-  const expected = owner.trim().toLowerCase();
+export function checkSyncAccount(
+  email: string | null | undefined,
+  emailVerified: boolean,
+): AccountCheck {
+  const signedIn = (email ?? '').trim();
   if (!signedIn) {
     return {
       ok: false,
       problem: 'missing-email',
-      message: `This Google account has no email address, so sync cannot tell whose sets these are. Sign in as ${owner}.`,
+      message: 'This Google account has no email address, so Research cannot create a private synced workspace.',
     };
   }
-  if (signedIn !== expected) {
+  if (!emailVerified) {
     return {
       ok: false,
-      problem: 'wrong-account',
-      message: `Signed in as ${email}. Your sets sync under ${owner}, and every account gets its own separate library — switch accounts to sync this device.`,
+      problem: 'unverified-email',
+      message: `Verify ${signedIn} with Google before syncing Research.`,
     };
   }
   return { ok: true };

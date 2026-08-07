@@ -13,7 +13,7 @@ import {
   setDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { OWNER_EMAIL, authPersistenceReady, firebaseAuth, googleProvider, recallFirestore } from '../firebase';
+import { authPersistenceReady, firebaseAuth, googleProvider, recallFirestore } from '../firebase';
 import type { AppData, SyncStatus } from '../model';
 import {
   applyRemoteProgress,
@@ -73,10 +73,10 @@ class CloudEngine {
         this.setStatus({ state: 'off' });
         return;
       }
-      const check = checkSyncAccount(user.email, OWNER_EMAIL);
+      const check = checkSyncAccount(user.email, user.emailVerified);
       if (!check.ok) {
         // Stay signed in so the address is visible, but never read, write, or
-        // push under an account whose silo is not this library.
+        // push until the account has the claims required by the rules.
         this.user = null;
         this.setStatus({
           state: 'error',
@@ -153,16 +153,10 @@ class CloudEngine {
   private fail(error: unknown, email?: string) {
     const code = (error as { code?: string })?.code ?? '';
     if (code.includes('permission-denied')) {
-      // The account was checked before listening, so a denial here means the
-      // project is still running a ruleset without Recall's block.
-      const check = checkSyncAccount(email, OWNER_EMAIL);
       this.setStatus({
         state: 'error',
         email,
-        error: check.ok
-          ? 'Firestore denied the request. The Recall rules are not live yet — deploy firestore.rules to the Firebase project once (npm run deploy:rules).'
-          : check.message,
-        wrongAccount: !check.ok,
+        error: 'Firestore denied the request. Confirm this is a verified Google session and deploy the complete shared firestore.rules file (npm run deploy:rules).',
       });
       return;
     }
