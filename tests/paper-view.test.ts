@@ -78,7 +78,7 @@ describe('data view extraction', () => {
     expect(views.tables[0].label).toBe('Table 1');
     expect(views.tables[0].caption).toBe('Outcomes by arm');
     expect(views.tables[0].section).toBe('Results');
-    expect(views.tables[0].block.header).toEqual(['Arm', 'Survival', 'n']);
+    expect(views.tables[0].block!.header).toEqual(['Arm', 'Survival', 'n']);
   });
 
   it('collects equations with their maths intact', () => {

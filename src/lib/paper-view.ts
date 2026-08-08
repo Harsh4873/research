@@ -9,13 +9,21 @@ export interface FigureItem {
   label: string;
   caption: string;
   section: string;
+  /** Published artwork, when the source carried one. */
+  image?: string;
+  /** Where to read the float when it cannot be shown here. */
+  link?: string;
 }
 
 export interface TableItem {
   label: string;
   caption: string;
-  block: TableBlock;
+  /** Null when the source did not carry a machine-readable table. */
+  block: TableBlock | null;
   section: string;
+  /** Why the table is not here, when it is not. */
+  note?: string;
+  link?: string;
 }
 
 export interface EquationItem {
@@ -293,10 +301,35 @@ export function buildPaperViews(doc: ParsedDoc, pmcid?: string): PaperViews {
     }
     if (block.type === 'para' && pendingFloat?.kind === 'figure') {
       const last = views.figures[views.figures.length - 1];
-      if (last && !last.caption) last.caption = block.text;
-      else if (last) last.caption = `${last.caption} ${block.text}`.trim();
-      pendingFloat = null;
+      const image = block.inlines.find((run) => run.kind === 'image');
+      const fallback = block.inlines.find((run) => run.kind === 'link');
+      if (last && image) last.image = image.href;
+      if (last && !image && fallback && !block.text.replace(fallback.text, '').trim()) last.link = fallback.href;
+      const prose = block.inlines
+        .filter((run) => run.kind !== 'image')
+        .map((run) => run.text)
+        .join('')
+        .trim();
+      if (last && prose && !image) last.caption = last.caption ? `${last.caption} ${prose}`.trim() : prose;
+      // An artwork-only paragraph is not the caption, so the float stays open
+      // for the paragraph that is.
+      if (!image && !fallback) pendingFloat = null;
       // Figure captions are prose worth searching, so fall through to skim.
+    }
+
+    // A table the source could not express machine-readably still belongs in
+    // Data, as the note and the link to where it can be read.
+    if (block.type === 'para' && pendingFloat?.kind === 'table') {
+      const link = block.inlines.find((run) => run.kind === 'link');
+      views.tables.push({
+        label: pendingFloat.label,
+        caption: pendingFloat.caption,
+        block: null,
+        section,
+        note: block.text.replace(link?.text ?? '', '').replace(/[_\s]+$/g, '').replace(/^[_\s]+/, '').trim(),
+        link: link?.href,
+      });
+      pendingFloat = null;
     }
 
     if (block.type === 'list' && inSupplements) {

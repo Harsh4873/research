@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describePaperId, europePmcQuery, normalizePmcid, parsePaperId } from '../src/lib/paper-id';
+import { describePaperId, europePmcQuery, normalizePmcid, parsePaperId, parsePaperIds, trimDoi } from '../src/lib/paper-id';
 import { createPaperSet, isPaperSet, paperFrontMatter, paperSubtitle } from '../src/lib/paper-set';
 
 describe('parsePaperId', () => {
@@ -80,5 +80,31 @@ describe('paper sets', () => {
   it('falls back to a DOI when there is no PMID', () => {
     expect(paperSubtitle({ journal: 'Cell', year: '2021', doi: '10.1/x' })).toBe('Cell · 2021 · DOI 10.1/x');
     expect(paperSubtitle({})).toBe('');
+  });
+});
+
+describe('DOIs that contain brackets', () => {
+  it('keeps a balanced bracket in the suffix', () => {
+    expect(parsePaperId('10.1016/S1473-3099(09)70282-8')).toEqual({
+      kind: 'doi',
+      value: '10.1016/S1473-3099(09)70282-8',
+    });
+    expect(parsePaperIds('See 10.1016/S0140-6736(24)02317-1 for the meta-analysis.').map((id) => id.value)).toEqual([
+      '10.1016/S0140-6736(24)02317-1',
+    ]);
+  });
+
+  it('still drops a bracket that closes the sentence, not the DOI', () => {
+    expect(parsePaperIds('(reported previously: 10.1093/molbev/msaa069).').map((id) => id.value)).toEqual([
+      '10.1093/molbev/msaa069',
+    ]);
+    expect(parsePaperId('10.1093/cid/cir939.')).toEqual({ kind: 'doi', value: '10.1093/cid/cir939' });
+  });
+
+  it('trims a trailing bracket only when it is unmatched', () => {
+    expect(trimDoi('10.1000/abc(1)')).toBe('10.1000/abc(1)');
+    expect(trimDoi('10.1000/abc)')).toBe('10.1000/abc');
+    expect(trimDoi('10.1000/abc(1))')).toBe('10.1000/abc(1)');
+    expect(trimDoi('10.1000/abc.,;')).toBe('10.1000/abc');
   });
 });

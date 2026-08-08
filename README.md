@@ -11,14 +11,17 @@ Both share the same clean reading view with read-aloud, and turning on Sync keep
 
 - Accepts a bare PMID, a PMCID, a DOI, or a pasted PubMed / PMC / Europe PMC / doi.org URL.
 - **Search your library**: the saved papers list filters as you type — by title, author, journal, year, PMID, PMCID, DOI, or any word in the paper's text (body matches show a snippet). Looking up an identifier you already saved offers to open it instead of fetching it again.
+- **The manuscript bibliography** is one click: Review offers every reference cited by the diabetes selection manuscript and its supplementary material as a collection, fetches only the ones not already saved, and the offer disappears once they all are.
 - **Bulk import**: paste a whole reference list, or drop a `.docx` / `.txt` / `.csv` / `.ris` of one. Every PMID, PMCID, and DOI in it is fetched, and the copies of a paper cited three different ways collapse into one set.
-- Fetches open-access full text from Europe PMC as JATS XML and converts it to Markdown: sectioned headings, structured abstract, GFM tables with captions and footnotes, equations (LaTeX and MathML), figure captions, supplementary material, glossary, and references.
+- Fetches open-access full text from Europe PMC as JATS XML and converts it to Markdown: sectioned headings, structured abstract, tables with captions and footnotes, equations (LaTeX and MathML), figures with their published artwork, supplementary material, glossary, and references.
+- **Tables keep their shape.** A table is laid out on a grid before it becomes Markdown, so a cell that spans rows or columns is written at every position it covers and a two-row header is flattened into one (`Time point — 0 month`). Dropping a `rowspan` shifts every later row a column to the left, which quietly files values under the wrong heading; that no longer happens.
+- **Figures show the figure.** The artwork published with the article is carried through and rendered; if the image will not load, or the article never published one, the figure degrades to a link to it rather than a broken box. Tables the source only published as a picture say so and link out.
 - Falls back to the PubMed abstract (via Europe PMC, then NCBI E-utilities) when a paper is not open access, and says so plainly.
 - **PDF upload** for anything paywalled: the file is parsed on the device with PDF.js — column-aware line reconstruction, heading detection, running-head removal, table and equation heuristics, and caption capture. Nothing is uploaded.
 - Mines an abbreviations glossary from the prose, so `Operational taxonomic unit (OTU)` is defined for you.
 - Review is for **reading**, not drilling. A paper opens with its own tabs:
   - **Notes** — the whole paper as clean markdown, with every DOI, PMID, and PMC id clickable.
-  - **Data** — every supplementary file (linked straight to its download), table, figure caption, equation, and data-availability statement in one place.
+  - **Data** — every supplementary file (linked straight to its download), table, figure (artwork and caption, or a link when it cannot be shown), equation, and data-availability statement in one place.
   - **Claims** — the sentences where the authors say what they found, filtered by findings / conclusions / quantified results.
   - **Find** — instant search across the paper, plus a Numbers mode listing every effect size, p-value, percentage, and count with its sentence.
   - **Skim** — the headline claims, then a section-by-section gist with each section's key numbers.

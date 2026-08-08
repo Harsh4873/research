@@ -4,7 +4,9 @@ export type Inline =
   | { kind: 'bold'; text: string }
   | { kind: 'italic'; text: string }
   | { kind: 'code'; text: string }
-  | { kind: 'link'; text: string; href: string };
+  | { kind: 'link'; text: string; href: string }
+  /** `text` is the alt text, and the caption shown if the image will not load. */
+  | { kind: 'image'; text: string; href: string };
 
 export interface ListItem {
   inlines: Inline[];

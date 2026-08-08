@@ -8,6 +8,30 @@ export interface PaperId {
 const DOI_RE = /\b(10\.\d{4,9}\/[^\s"'<>]+)/i;
 
 /**
+ * Trim the sentence a DOI was written into, without trimming the DOI.
+ *
+ * Elsevier and Wiley suffixes carry brackets — `10.1016/S1473-3099(09)70282-8`
+ * — so a closing bracket is only punctuation when it has no opener to match,
+ * as in "(see 10.1234/abc)".
+ */
+export function trimDoi(value: string): string {
+  let doi = value.trim();
+  for (;;) {
+    const next = doi.replace(/[.,;:]+$/, '');
+    if (next.endsWith(')') && (next.match(/\)/g) ?? []).length > (next.match(/\(/g) ?? []).length) {
+      doi = next.slice(0, -1);
+      continue;
+    }
+    if (next.endsWith(']') && (next.match(/\]/g) ?? []).length > (next.match(/\[/g) ?? []).length) {
+      doi = next.slice(0, -1);
+      continue;
+    }
+    if (next === doi) return doi;
+    doi = next;
+  }
+}
+
+/**
  * Accepts what a person actually pastes: a bare PMID, a PMCID, a DOI, or a
  * PubMed / PMC / doi.org URL.
  */
@@ -30,7 +54,7 @@ export function parsePaperId(input: string): PaperId | null {
 
   // DOIs, including doi.org URLs.
   const doi = raw.match(DOI_RE);
-  if (doi) return { kind: 'doi', value: doi[1].replace(/[.,;)]+$/, '') };
+  if (doi) return { kind: 'doi', value: trimDoi(doi[1]) };
 
   // A bare number is a PMID. PubMed numbering starts at 1, so any 1–9 digit
   // number is a candidate; longer strings are not PMIDs.
@@ -66,9 +90,9 @@ export function parsePaperIds(text: string): PaperId[] {
   // Most specific first; each match is blanked so later passes cannot
   // rediscover its digits as a PMID.
   consume(/\bPMC\s?(\d+)\b/gi, (m) => add({ kind: 'pmcid', value: normalizePmcid(m[1]) }));
-  consume(/\b(10\.\d{4,9}\/[^\s,;"'<>()[\]]+)/g, (m) =>
-    add({ kind: 'doi', value: m[1].replace(/[.,;)]+$/, '') }),
-  );
+  // Brackets stay in the scan so a DOI that contains them survives; trimDoi
+  // then decides which trailing bracket belongs to the sentence.
+  consume(/\b(10\.\d{4,9}\/[^\s,;"'<>]+)/g, (m) => add({ kind: 'doi', value: trimDoi(m[1]) }));
   consume(/\bPMID\s*[:#]?\s*(\d{1,9})\b/gi, (m) => add({ kind: 'pmid', value: m[1] }));
   consume(/\b(\d{7,8})\b/g, (m) => add({ kind: 'pmid', value: m[1] }));
 
