@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { ImageOff } from 'lucide-react';
 import type { Inline } from '../model';
 import { normalizeKey } from '../lib/extract';
 
@@ -48,6 +49,35 @@ export function autoLink(text: string, keyPrefix: string): ReactNode[] {
   return out;
 }
 
+/**
+ * A figure from the publisher. Papers are read offline as often as online and
+ * publishers move their artwork, so a figure that will not load degrades to the
+ * link rather than to a broken image.
+ */
+export function PaperImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  if (failed) {
+    return (
+      <span className="figure-fallback">
+        <ImageOff size={15} aria-hidden />
+        <a href={src} target="_blank" rel="noreferrer noopener">
+          {alt ? `${alt} — open the image` : 'Open the image'}
+        </a>
+      </span>
+    );
+  }
+
+  return (
+    <span className="figure-wrap" data-loaded={loaded}>
+      <a href={src} target="_blank" rel="noreferrer noopener" title="Open the full-size image">
+        <img src={src} alt={alt} loading="lazy" onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+      </a>
+    </span>
+  );
+}
+
 export function InlineRuns({ runs, termKeys }: InlineRunsProps) {
   return (
     <>
@@ -71,6 +101,8 @@ export function InlineRuns({ runs, termKeys }: InlineRunsProps) {
                 {run.text}
               </a>
             );
+          case 'image':
+            return <PaperImage key={i} src={run.href} alt={run.text} />;
           default:
             return <span key={i}>{autoLink(run.text, `t${i}`)}</span>;
         }

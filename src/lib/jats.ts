@@ -200,6 +200,8 @@ function inlineMarkdown(node: XmlNode, opts: InlineOptions = { dropCitations: tr
 
 function paragraphText(node: XmlElement): string {
   return collapse(inlineMarkdown(node))
+    // A superscripted ordinal is not maths: "3 ^rd" should read "3rd".
+    .replace(/(\d)\s*\^(st|nd|rd|th)\b/gi, '$1$2')
     .replace(/\s+([),.;:%])/g, '$1')
     .replace(/\(\s*[,;]?\s*\)/g, '')
     .replace(/\[\s*[,;]?\s*\]/g, '')
@@ -217,6 +219,8 @@ interface Ctx {
   supplements: string[];
   /** Display equations published only as images, so with no text form. */
   imageEquations: number;
+  /** Set when the article is in PMC, which is what makes float links resolvable. */
+  pmcid?: string;
 }
 
 function push(ctx: Ctx, text: string) {
@@ -237,6 +241,112 @@ function isMonospaceBlock(node: XmlElement): boolean {
   return monospace > 0;
 }
 
+/** One source row's cells, before they are placed on the grid. */
+interface SourceCell {
+  text: string;
+  colspan: number;
+  rowspan: number;
+}
+
+const MAX_SPAN = 24;
+
+function readSpan(value: string | undefined): number {
+  const span = Number.parseInt(value ?? '1', 10);
+  return Number.isFinite(span) && span > 1 ? Math.min(span, MAX_SPAN) : 1;
+}
+
+/**
+ * Lay a JATS table out on a grid, honouring both spans.
+ *
+ * Markdown has no spans, so a cell covering several rows or columns has to be
+ * placed at every position it covers. Doing that is what keeps the columns
+ * aligned: dropping a rowspan (as a naive reader does) shifts every later row
+ * one column to the left, which silently moves values under the wrong heading.
+ */
+export function tableGrid(table: XmlElement): { head: string[][]; body: string[][] } {
+  const sourceRows: { cells: SourceCell[]; head: boolean }[] = [];
+  const walk = (parent: XmlElement, inHead: boolean) => {
+    for (const child of childElements(parent)) {
+      if (child.local === 'thead') walk(child, true);
+      else if (child.local === 'tbody' || child.local === 'tfoot') walk(child, false);
+      else if (child.local === 'tr') {
+        const cells = childElements(child)
+          .filter((cell) => cell.local === 'td' || cell.local === 'th')
+          .map((cell) => ({
+            text: escapeCell(paragraphText(cell)),
+            colspan: readSpan(cell.attrs.colspan),
+            rowspan: readSpan(cell.attrs.rowspan),
+          }));
+        // A row of nothing but `th` outside an explicit thead is still a header.
+        const allHeader =
+          childElements(child).length > 0 &&
+          childElements(child).every((cell) => cell.local === 'th' || cell.local !== 'td');
+        if (cells.length > 0) sourceRows.push({ cells, head: inHead || (allHeader && sourceRows.length === 0) });
+      }
+    }
+  };
+  walk(table, false);
+
+  const grid: string[][] = [];
+  const headFlags: boolean[] = [];
+  /** Cells still spanning down from an earlier row, keyed by column. */
+  const carry = new Map<number, { text: string; rows: number }>();
+
+  for (const row of sourceRows) {
+    const out: string[] = [];
+    let column = 0;
+    const place = (text: string) => {
+      out[column] = text;
+      column += 1;
+    };
+    const drainCarry = () => {
+      while (carry.has(column)) {
+        const held = carry.get(column) as { text: string; rows: number };
+        place(held.text);
+      }
+    };
+
+    for (const cell of row.cells) {
+      drainCarry();
+      const start = column;
+      for (let i = 0; i < cell.colspan; i += 1) place(cell.text);
+      if (cell.rowspan > 1) {
+        // Counted from this row: the decrement below consumes the row the cell
+        // originates in, leaving rowspan - 1 rows still to fill.
+        for (let i = 0; i < cell.colspan; i += 1) carry.set(start + i, { text: cell.text, rows: cell.rowspan });
+      }
+    }
+    drainCarry();
+
+    for (const [key, held] of [...carry]) {
+      if (held.rows <= 1) carry.delete(key);
+      else carry.set(key, { text: held.text, rows: held.rows - 1 });
+    }
+
+    grid.push(out);
+    headFlags.push(row.head);
+  }
+
+  const width = Math.max(2, ...grid.map((row) => row.length));
+  const normalise = (row: string[]) => Array.from({ length: width }, (_, i) => row[i] ?? '');
+  const head: string[][] = [];
+  const body: string[][] = [];
+  grid.forEach((row, index) => (headFlags[index] ? head : body).push(normalise(row)));
+  return { head, body };
+}
+
+/** Flatten a multi-row header into the single row Markdown allows. */
+function joinHeader(head: string[][], width: number): string[] {
+  return Array.from({ length: width }, (_, column) => {
+    const parts: string[] = [];
+    for (const row of head) {
+      const value = (row[column] ?? '').trim();
+      if (value && !parts.includes(value)) parts.push(value);
+    }
+    return parts.join(' — ');
+  });
+}
+
 function convertTable(wrap: XmlElement, ctx: Ctx) {
   const label = textContent(firstChild(wrap, 'label'));
   const caption = textContent(firstChild(wrap, 'caption'));
@@ -246,47 +356,36 @@ function convertTable(wrap: XmlElement, ctx: Ctx) {
   // remaining real, navigable headings.
   push(ctx, `#### ${heading || 'Table'}`);
 
-  if (!table) {
-    push(ctx, '_Table content is not available in the machine-readable full text._');
+  const unavailable = () => {
+    const link = floatLink(ctx, wrap, 'table');
+    push(
+      ctx,
+      link
+        ? `_Table content is not in the machine-readable full text._ [View this table on PMC](${link})`
+        : '_Table content is not available in the machine-readable full text._',
+    );
     ctx.counts.tables += 1;
-    return;
-  }
-
-  const rows: string[][] = [];
-  let headerRow: string[] | null = null;
-
-  for (const section of childElements(table)) {
-    if (section.local !== 'thead' && section.local !== 'tbody' && section.local !== 'tr') continue;
-    const trs = section.local === 'tr' ? [section] : findDescendants(section, 'tr');
-    for (const tr of trs) {
-      const cells = childElements(tr)
-        .filter((cell) => cell.local === 'td' || cell.local === 'th')
-        .flatMap((cell) => {
-          const text = escapeCell(paragraphText(cell));
-          const span = Number.parseInt(cell.attrs.colspan ?? '1', 10);
-          const count = Number.isFinite(span) && span > 1 ? Math.min(span, 12) : 1;
-          return count > 1 ? [text, ...Array.from({ length: count - 1 }, () => '')] : [text];
-        });
-      if (cells.length === 0) continue;
-      if (section.local === 'thead' && !headerRow) headerRow = cells;
-      else rows.push(cells);
-    }
-  }
-
-  if (!headerRow && rows.length > 0) headerRow = rows.shift() ?? null;
-  if (!headerRow) {
-    push(ctx, '_Table content is not available in the machine-readable full text._');
-    ctx.counts.tables += 1;
-    return;
-  }
-
-  const width = Math.max(headerRow.length, ...rows.map((row) => row.length), 2);
-  const pad = (row: string[]) => {
-    const copy = [...row];
-    while (copy.length < width) copy.push('');
-    return copy.slice(0, width);
   };
-  const header = pad(headerRow).map((cell, i) => cell || `Column ${i + 1}`);
+
+  if (!table) {
+    unavailable();
+    return;
+  }
+
+  const { head, body } = tableGrid(table);
+  const rows = head.length > 0 ? body : body.slice(1);
+  const headerSource = head.length > 0 ? head : body.slice(0, 1);
+  if (headerSource.length === 0) {
+    unavailable();
+    return;
+  }
+
+  const width = Math.max(2, ...headerSource.map((row) => row.length), ...rows.map((row) => row.length));
+  const pad = (row: string[]) => Array.from({ length: width }, (_, i) => row[i] ?? '');
+  const joined = joinHeader(headerSource.map(pad), width);
+  // A stub column genuinely has no heading, so leave it blank; only name the
+  // columns when the source gave no header row at all.
+  const header = joined.some(Boolean) ? joined : joined.map((_, i) => `Column ${i + 1}`);
 
   const lines = [`| ${header.join(' | ')} |`, `| ${header.map(() => '---').join(' | ')} |`];
   for (const row of rows) lines.push(`| ${pad(row).join(' | ')} |`);
@@ -311,6 +410,28 @@ function convertTable(wrap: XmlElement, ctx: Ctx) {
   ctx.counts.tables += 1;
 }
 
+/** Deep link to a float on PMC, for anything that cannot be rendered here. */
+function floatLink(ctx: Ctx, node: XmlElement, kind: 'table' | 'figure'): string | null {
+  if (!ctx.pmcid) return null;
+  const id = node.attrs.id;
+  if (!id) return `https://www.ncbi.nlm.nih.gov/pmc/articles/${ctx.pmcid}/`;
+  return `https://www.ncbi.nlm.nih.gov/pmc/articles/${ctx.pmcid}/${kind === 'table' ? 'table' : 'figure'}/${id}/`;
+}
+
+/**
+ * The hosted image for a figure's graphic. PMC serves a float's artwork from
+ * the article's `bin` path under the file name the XML references.
+ */
+function graphicUrl(ctx: Ctx, fig: XmlElement): string | null {
+  if (!ctx.pmcid) return null;
+  const graphic = findDescendant(fig, 'graphic') ?? findDescendant(fig, 'inline-graphic');
+  const href = graphic?.attrs['xlink:href'] ?? graphic?.attrs.href;
+  if (!href) return null;
+  // Some journals reference the file without its extension.
+  const file = /\.[a-z0-9]{3,4}$/i.test(href) ? href : `${href}.jpg`;
+  return `https://www.ncbi.nlm.nih.gov/pmc/articles/${ctx.pmcid}/bin/${encodeURIComponent(file)}`;
+}
+
 function convertFigure(fig: XmlElement, ctx: Ctx) {
   const label = textContent(firstChild(fig, 'label'));
   const caption = firstChild(fig, 'caption');
@@ -320,8 +441,20 @@ function convertFigure(fig: XmlElement, ctx: Ctx) {
     : '';
   const heading = [label, capTitle].filter(Boolean).join(' ').trim();
   push(ctx, `#### ${heading || 'Figure'}`);
+
+  // The artwork is written as a Markdown image so it survives in storage and
+  // renders wherever the document is shown; the renderer falls back to a link
+  // if the image will not load.
+  const image = graphicUrl(ctx, fig);
+  if (image) push(ctx, `![${(heading || 'Figure').replace(/[[\]]/g, '')}](${image})`);
+
   if (capBody) push(ctx, capBody);
   else if (!heading) push(ctx, '_Figure caption is not available._');
+
+  if (!image) {
+    const link = floatLink(ctx, fig, 'figure');
+    if (link) push(ctx, `[View this figure on PMC](${link})`);
+  }
   ctx.counts.figures += 1;
 }
 
@@ -529,6 +662,20 @@ function articleId(articleMeta: XmlElement | undefined, type: string): string | 
   if (!articleMeta) return undefined;
   for (const id of childElements(articleMeta, 'article-id')) {
     if (id.attrs['pub-id-type'] === type) return textContent(id);
+  }
+  return undefined;
+}
+
+/**
+ * PMC identifies articles under several `pub-id-type` values depending on the
+ * feed: `pmc` in NCBI's own XML, `pmcid` or `pmcaid` in Europe PMC's. Reading
+ * only the first left every Europe PMC document without its PMC id, and with
+ * it the links and images that hang off that id.
+ */
+function pmcIdOf(articleMeta: XmlElement | undefined): string | undefined {
+  for (const type of ['pmcid', 'pmc', 'pmcaid']) {
+    const raw = articleId(articleMeta, type);
+    if (raw && /\d/.test(raw)) return `PMC${raw.replace(/^PMC/i, '').trim()}`;
   }
   return undefined;
 }
@@ -748,7 +895,7 @@ export function jatsToMarkdown(xml: string, overrides: JatsOverrides = {}): Pape
     year: pubYear(articleMeta),
     doi: overrides.doi ?? articleId(articleMeta, 'doi'),
     pmid: overrides.pmid ?? articleId(articleMeta, 'pmid'),
-    pmcid: overrides.pmcid ?? (articleId(articleMeta, 'pmc') ? `PMC${articleId(articleMeta, 'pmc')!.replace(/^PMC/i, '')}` : undefined),
+    pmcid: overrides.pmcid ?? pmcIdOf(articleMeta),
     license,
     keywords,
   };
@@ -758,6 +905,7 @@ export function jatsToMarkdown(xml: string, overrides: JatsOverrides = {}): Pape
     counts: { sections: 0, tables: 0, figures: 0, equations: 0, supplements: 0, references: 0 },
     supplements: [],
     imageEquations: 0,
+    pmcid: meta.pmcid,
   };
 
   const abstract = articleMeta ? firstChild(articleMeta, 'abstract') : undefined;

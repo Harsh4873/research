@@ -84,7 +84,10 @@ export function parseInlines(src: string): Inline[] {
       const link = readLink(src, i + 1);
       if (link) {
         flush();
-        if (link.text) out.push({ kind: 'text', text: link.text });
+        // Keep the target: a paper's figures are published as images, and the
+        // renderer needs the URL to show one (or to link it when it fails).
+        if (link.href) out.push({ kind: 'image', text: link.text, href: link.href });
+        else if (link.text) out.push({ kind: 'text', text: link.text });
         i = link.next;
         continue;
       }

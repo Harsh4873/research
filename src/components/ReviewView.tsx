@@ -7,6 +7,7 @@ import {
   Copy,
   Download,
   FileDown,
+  Library,
   Loader2,
   Microscope,
   Search,
@@ -20,6 +21,7 @@ import type { AppData, StudyMaterial, StudySet } from '../model';
 import { masteryPercent } from '../lib/store';
 import { isPaperSet, paperFrontMatter, paperSubtitle } from '../lib/paper-set';
 import { findExistingPaper, searchPapers } from '../lib/paper-search';
+import { BIBLIOGRAPHY, bibliographyText } from '../content/bibliography';
 import { parsePaperIds } from '../lib/paper-id';
 import { isReferenceFile } from '../lib/reference-file';
 import { copyText } from '../lib/clipboard';
@@ -76,6 +78,18 @@ export function ReviewView(props: ReviewViewProps) {
   const busy = phase.kind === 'working';
   const pendingCount = query.trim() ? parsePaperIds(query).length : 0;
   const matches = useMemo(() => searchPapers(data.sets, filter), [data.sets, filter]);
+
+  // Which of the manuscript's references are already here, so the collection
+  // offers only what is missing and disappears once it is all saved.
+  const savedDois = useMemo(() => {
+    const dois = new Set<string>();
+    for (const set of papers) {
+      const doi = paperFrontMatter(set.markdown).doi;
+      if (doi) dois.add(doi.toLowerCase());
+    }
+    return dois;
+  }, [papers]);
+  const missingFromBibliography = BIBLIOGRAPHY.filter((entry) => !savedDois.has(entry.doi.toLowerCase())).length;
 
   const run = async (task: (onStatus: (status: string) => void) => Promise<Phase>) => {
     setPhase({ kind: 'working', status: 'Starting…' });
@@ -256,6 +270,29 @@ export function ReviewView(props: ReviewViewProps) {
             }}
           />
         </div>
+
+        {missingFromBibliography > 0 && (
+          <div className="review-collection">
+            <div>
+              <strong>The manuscript bibliography</strong>
+              <span>
+                {BIBLIOGRAPHY.length} references cited by the diabetes selection manuscript and its supplementary
+                material.{' '}
+                {missingFromBibliography < BIBLIOGRAPHY.length
+                  ? `${BIBLIOGRAPHY.length - missingFromBibliography} are already saved.`
+                  : 'None are saved yet.'}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={() => runMany(bibliographyText(BIBLIOGRAPHY.filter((entry) => !savedDois.has(entry.doi.toLowerCase()))))}
+            >
+              <Library size={15} aria-hidden /> Load {missingFromBibliography}
+            </button>
+          </div>
+        )}
 
         {phase.kind === 'working' && (
           <div className="review-status fade-in" role="status">

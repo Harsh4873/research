@@ -23,6 +23,7 @@ import {
   type SearchHit,
 } from '../lib/paper-view';
 import { copyText } from '../lib/clipboard';
+import { PaperImage } from './Inline';
 
 function jumpToNotes(setId: string, headingId?: string) {
   window.location.hash = `/set/${setId}/notes`;
@@ -141,12 +142,28 @@ export function DataView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string
                 {table.caption ? ` ${table.caption}` : ''}
                 <span className="data-section">{table.section}</span>
               </figcaption>
-              <DocTable block={table.block} />
+              {table.block ? (
+                <DocTable block={table.block} />
+              ) : (
+                <p className="figure-fallback-block">
+                  {table.note || 'This table is not in the machine-readable full text.'}
+                  {table.link ? (
+                    <>
+                      {' '}
+                      <a href={table.link} target="_blank" rel="noreferrer noopener">
+                        Read it in the article <ExternalLink size={12} aria-hidden />
+                      </a>
+                    </>
+                  ) : null}
+                </p>
+              )}
               <div className="data-actions">
-                <CopyButton
-                  label="Copy as TSV"
-                  text={[table.block.header, ...table.block.rows].map((row) => row.join('\t')).join('\n')}
-                />
+                {table.block ? (
+                  <CopyButton
+                    label="Copy as TSV"
+                    text={[table.block.header, ...table.block.rows].map((row) => row.join('\t')).join('\n')}
+                  />
+                ) : null}
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => jumpToNotes(setId)}>
                   In context <ArrowUpRight size={13} aria-hidden />
                 </button>
@@ -165,16 +182,28 @@ export function DataView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string
             {figures.map((figure, i) => (
               <div key={i} className="figure-card">
                 <div className="figure-label">{figure.label}</div>
+                {figure.image ? <PaperImage src={figure.image} alt={figure.label} /> : null}
                 <p className="figure-caption">{figure.caption || 'No caption was published with this figure.'}</p>
-                <span className="data-section">{figure.section}</span>
+                <div className="figure-card-foot">
+                  <span className="data-section">{figure.section}</span>
+                  {!figure.image && (figure.link || pmcid) ? (
+                    <a
+                      href={figure.link ?? `https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      View <ExternalLink size={12} aria-hidden />
+                    </a>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>
-          {pmcid && (
+          {pmcid && figures.every((figure) => !figure.image) && (
             <p className="pane-note">
-              Figure images are not part of the machine-readable text.{' '}
+              This article's artwork is not published with its machine-readable text.{' '}
               <a href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`} target="_blank" rel="noreferrer noopener">
-                View them in the article <ExternalLink size={12} aria-hidden />
+                View the figures in the article <ExternalLink size={12} aria-hidden />
               </a>
             </p>
           )}
