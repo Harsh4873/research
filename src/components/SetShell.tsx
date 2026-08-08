@@ -10,6 +10,7 @@ import {
   Pencil,
   ExternalLink,
   Quote,
+  RefreshCw,
   Search,
   Table2,
   Trash2,
@@ -41,6 +42,8 @@ interface SetShellProps {
   onAddNote: (note: string) => void;
   onDelete: () => void;
   onExport: () => void;
+  /** Re-fetch a paper from its identifier; returns what changed, for the notice. */
+  onRefresh?: (set: StudySet) => Promise<string>;
 }
 
 const STUDY_TABS: { mode: Mode; label: string; icon: typeof BookOpen }[] = [
@@ -63,6 +66,8 @@ export function SetShell(props: SetShellProps) {
   const { set, material, progress, mode, onNavigate, onBack, backLabel = 'Library' } = props;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(set.markdown);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
 
   const ids = [...material.terms.map((t) => t.id), ...material.clozes.map((c) => c.id)];
   const mastery = masteryPercent(progress, ids);
@@ -73,6 +78,12 @@ export function SetShell(props: SetShellProps) {
   const front = isPaper ? paperFrontMatter(set.markdown) : {};
   const subtitle = isPaper ? paperSubtitle(front) : '';
   const doi = front.doi;
+  // Only the abstract is here when the source line says so; re-fetching can now
+  // reach author manuscripts that Europe PMC alone did not serve.
+  const abstractOnly = /PubMed abstract/i.test(front.source ?? '');
+  const refreshTitle = abstractOnly
+    ? 'Re-fetch this paper — the full text may be available now'
+    : 'Re-fetch this paper from its source';
 
   return (
     <div className="set-shell fade-in">
@@ -95,6 +106,25 @@ export function SetShell(props: SetShellProps) {
             >
               <Pencil size={16} aria-hidden />
             </button>
+            {isPaper && props.onRefresh && (front.pmcid || front.pmid || front.doi) ? (
+              <button
+                type="button"
+                className="icon-btn"
+                title={refreshTitle}
+                aria-label={refreshTitle}
+                disabled={refreshing}
+                onClick={async () => {
+                  setRefreshing(true);
+                  try {
+                    setRefreshNote(await props.onRefresh!(set));
+                  } finally {
+                    setRefreshing(false);
+                  }
+                }}
+              >
+                <RefreshCw size={16} aria-hidden className={refreshing ? 'spin' : undefined} />
+              </button>
+            ) : null}
             <button type="button" className="icon-btn" title="Export as JSON" aria-label="Export as JSON" onClick={props.onExport}>
               <Download size={16} aria-hidden />
             </button>
@@ -146,6 +176,15 @@ export function SetShell(props: SetShellProps) {
           </div>
         )}
       </div>
+
+      {refreshNote && (
+        <div className="refresh-note fade-in" role="status">
+          {refreshNote}
+          <button type="button" className="link-btn" onClick={() => setRefreshNote(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {editing && (
         <div className="source-editor fade-in">

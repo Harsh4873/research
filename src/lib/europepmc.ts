@@ -90,10 +90,51 @@ async function ncbiAbstract(pmid: string, signal?: AbortSignal): Promise<string 
   return best;
 }
 
+/** True when the document carries an article body, not just front matter. */
+export function hasArticleBody(xml: string): boolean {
+  const body = xml.search(/<body[\s>]/);
+  if (body === -1) return false;
+  // An empty <body/> or one holding only whitespace is not full text.
+  return /<body[\s>][\s\S]{200,}?<\/body>/.test(xml);
+}
+
+export interface FullTextSource {
+  xml: string;
+  /** Which archive served it, for the provenance line. */
+  from: 'europepmc' | 'pmc';
+}
+
 export async function fetchFullTextXml(pmcid: string, signal?: AbortSignal): Promise<string | null> {
   const xml = await getText(`${EPMC}/${normalizePmcid(pmcid)}/fullTextXML`, signal);
   if (!xml || !xml.includes('<article')) return null;
   return xml;
+}
+
+/**
+ * NCBI's copy of the same article.
+ *
+ * Europe PMC does not serve `fullTextXML` for author manuscripts (the NIHMS
+ * and EMS deposits), and those are a large slice of clinical literature: for
+ * them Europe PMC answers with nothing while NCBI returns the complete JATS.
+ * Asking both is the difference between an abstract and the paper.
+ */
+export async function fetchPmcFullTextXml(pmcid: string, signal?: AbortSignal): Promise<string | null> {
+  const id = normalizePmcid(pmcid).replace(/^PMC/i, '');
+  if (!id) return null;
+  const xml = await getText(`${EUTILS}/efetch.fcgi?db=pmc&id=${encodeURIComponent(id)}&retmode=xml`, signal);
+  if (!xml || !xml.includes('<article')) return null;
+  return xml;
+}
+
+/** The best full text either archive has for this article, or null. */
+export async function fetchAnyFullTextXml(pmcid: string, signal?: AbortSignal): Promise<FullTextSource | null> {
+  const epmc = await fetchFullTextXml(pmcid, signal).catch(() => null);
+  if (epmc && hasArticleBody(epmc)) return { xml: epmc, from: 'europepmc' };
+  const ncbi = await fetchPmcFullTextXml(pmcid, signal).catch(() => null);
+  if (ncbi && hasArticleBody(ncbi)) return { xml: ncbi, from: 'pmc' };
+  // Neither carried a body; the Europe PMC copy is still the better metadata.
+  if (epmc) return { xml: epmc, from: 'europepmc' };
+  return null;
 }
 
 function metaFromRecord(record: EpmcRecord): PaperMeta {
@@ -195,14 +236,19 @@ export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<Lo
   if (id.kind === 'pmid' && !meta.pmid) meta.pmid = id.value;
 
   const pmcid = meta.pmcid;
-  if (pmcid && record.inEPMC !== 'N') {
-    const xml = await fetchFullTextXml(pmcid, signal).catch(() => null);
-    if (xml) {
-      const converted = jatsToMarkdown(xml, {
+  // Try whenever the article has a PMC identifier at all. `inEPMC: N` is
+  // exactly the author-manuscript case, where Europe PMC holds no full text
+  // but NCBI does, so gating on it was throwing away the papers most likely
+  // to be recoverable.
+  if (pmcid) {
+    const source = await fetchAnyFullTextXml(pmcid, signal).catch(() => null);
+    if (source) {
+      const archive = source.from === 'pmc' ? 'PubMed Central' : 'Europe PMC';
+      const converted = jatsToMarkdown(source.xml, {
         pmid: meta.pmid,
         pmcid,
         doi: meta.doi,
-        sourceNote: `Europe PMC full text (JATS) · ${pmcid}`,
+        sourceNote: `${archive} full text (JATS) · ${pmcid}`,
       });
       if (converted && converted.counts.sections > 0) {
         // Prefer search metadata for fields the XML leaves blank.
@@ -216,7 +262,10 @@ export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<Lo
         return {
           ...converted,
           fullText: true,
-          openAccessNote: 'Full text from Europe PMC (open access).',
+          openAccessNote:
+            source.from === 'pmc'
+              ? 'Full text from PubMed Central (author manuscript or open access).'
+              : 'Full text from Europe PMC (open access).',
         };
       }
     }

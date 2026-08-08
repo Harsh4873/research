@@ -302,6 +302,37 @@ export default function App() {
     navigate(`/set/${set.id}/notes`);
   };
 
+  /**
+   * Re-fetch a saved paper from its own identifier and keep the better result.
+   * A paper saved before an extraction improvement — or before its full text
+   * was reachable — stays as it was imported, so the fix has to be applied to
+   * the library, not only to the next import.
+   */
+  const refreshPaper = async (set: StudySet): Promise<string> => {
+    const front = paperFrontMatter(set.markdown);
+    const identifier = front.pmcid ?? front.pmid ?? front.doi;
+    if (!identifier) return 'This paper has no identifier to re-fetch it by.';
+    const id = parsePaperId(identifier);
+    if (!id) return 'This paper has no identifier to re-fetch it by.';
+
+    const wasAbstractOnly = /PubMed abstract/i.test(front.source ?? '');
+    try {
+      const { lookupPaper: lookup } = await import('./lib/europepmc');
+      const result = await lookup(id);
+      // Never trade a full text for an abstract: a transient outage upstream
+      // must not quietly shrink what is already saved.
+      if (wasAbstractOnly === false && !result.fullText) {
+        return 'The source only offered the abstract this time, so the saved copy was kept.';
+      }
+      if (result.markdown.trim() === set.markdown.trim()) return 'Already up to date — nothing changed.';
+      setData((d) => upsertSet(d, { ...set, markdown: result.markdown, updatedAt: Date.now() }));
+      if (wasAbstractOnly && result.fullText) return `Full text found. ${result.openAccessNote}`;
+      return 'Re-fetched from the source.';
+    } catch (error) {
+      return (error as Error)?.message ?? 'That re-fetch failed.';
+    }
+  };
+
   const savePapers = (drafts: PaperDraft[]) => {
     if (drafts.length === 0) return;
     const now = Date.now();
@@ -429,6 +460,7 @@ export default function App() {
             onAddNote={appendNote(activeSet)}
             onDelete={() => removeSet(activeSet)}
             onExport={() => exportSet(activeSet)}
+            onRefresh={refreshPaper}
           />
         ) : route.view === 'review' ? (
           <ReviewView
