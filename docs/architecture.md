@@ -32,8 +32,9 @@ Review reuses the whole study pipeline; it only adds a front end that produces m
 
 ```
 PMID / PMCID / DOI ─→ lib/paper-id.ts     parse and normalise the identifier
-                   ─→ lib/europepmc.ts    Europe PMC metadata, then full text;
-                                          NCBI E-utilities as metadata fallback
+                   ─→ lib/europepmc.ts    Europe PMC metadata, then full text from
+                                          Europe PMC or NCBI PMC, whichever has a
+                                          body; NCBI E-utilities as metadata fallback
                    ─→ lib/jats.ts         JATS XML → sectioned study markdown
 PDF file           ─→ lib/pdf-import.ts   PDF.js text runs (lazy-loaded)
                    ─→ lib/pdf-layout.ts   lines, columns, headings, tables → markdown
@@ -41,6 +42,7 @@ PDF file           ─→ lib/pdf-import.ts   PDF.js text runs (lazy-loaded)
                               the same extract → questions pipeline
 ```
 
+- Full text is requested from both archives. `fetchAnyFullTextXml` asks Europe PMC first and NCBI's `efetch db=pmc` second, keeping the copy `hasArticleBody` accepts: Europe PMC holds no `fullTextXML` for author manuscripts, and PMC keeps citation-only stubs for some articles, so neither source alone answers "is the full text available". The old `inEPMC !== 'N'` gate is gone — that flag marks exactly the author-manuscript case worth trying.
 - `src/lib/xml.ts` — a small dependency-free well-formed-XML parser, so JATS parsing behaves identically in the browser and in Node tests without a DOM implementation.
 - `src/lib/reference-file.ts` — reads a reference list out of a dropped file, including `.docx` (a minimal central-directory ZIP reader plus `DecompressionStream('deflate-raw')`, then the same XML parser over `word/document.xml`).
 - Bulk import: `parsePaperIds` scans free text for every identifier, matching bare numbers only in the 7–8 digit PMID range so years, volumes, and page numbers are not mistaken for ids. Because a reference list cites one paper by PMID, DOI, *and* PMCID, results are collapsed by `paperIdentity` after resolution — the real list this was built against yields 98 identifiers and 37 distinct papers.

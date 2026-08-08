@@ -2908,3 +2908,17 @@ textarea.review-input {
 }
 .review-collection strong { display: block; font-size: 14px; }
 .review-collection span { display: block; margin-top: 2px; font-size: 13px; color: var(--text-dim); max-width: 62ch; }
+
+.refresh-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  font-size: 13.5px;
+}
