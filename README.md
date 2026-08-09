@@ -1,12 +1,11 @@
 # Research
 
-Research is the owner's personal reading and study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. It has three halves:
+Research is the owner's personal reading and study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. It has two halves:
 
 - **Recall** — paste or upload Markdown notes and turn them into study material: flashcards, quizzes, fill-in-the-blanks, and a matching game.
 - **Review** — give it a PMID, PMCID, DOI, or a PDF and read the paper fast: notes, data, claims, find, and skim.
-- **Genes** — look up any *M. tuberculosis* H37Rv gene, read what has been published about it, and rank the whole genome by what makes a gene worth your time.
 
-All three share the same clean reading view with read-aloud, and turning on Sync keeps everything on every signed-in device (phone and laptop).
+Both share the same clean reading view with read-aloud, and turning on Sync keeps everything on every signed-in device (phone and laptop).
 
 ## Review: read papers fast
 
@@ -31,15 +30,6 @@ All three share the same clean reading view with read-aloud, and turning on Sync
 - Papers still sync and export like any other set; Recall keeps the flashcards, quiz, blanks, and match.
 
 All lookups use free, key-less public APIs (Europe PMC and NCBI E-utilities) straight from the browser; there is no backend.
-
-## Genes: what is worth investigating
-
-- **Look up any of the 4,018 H37Rv genes** by symbol (`eccD3`), locus tag (`Rv0205`, however you type it), or what the gene does (`alpha-mannosidase`, `type VII secretion`). An exact identifier always outranks a gene that merely mentions it in its annotation.
-- **The gene page** gives the product description, length, strand and position, and links out to Mycobrowser, NCBI, UniProt, STRING and KEGG — plus a deep link into the Selection Lab for that gene.
-- **The literature for that gene** comes from Europe PMC: the identifiers paired with the organism, scoped to title and abstract so a reference list does not count as a hit (`relA` gives 214 papers this way instead of 10,390). When a gene has nothing in title or abstract, the search widens to full text rather than reporting nothing — `Rv0205` goes from 0 papers to 3 real ones. Any paper listed can be sent straight to Review with one click.
-- **GenePrioritize** ranks all 4,018 genes on seven signals — selection strength (ω), statistical significance, mutation count, cohort difference, literature volume, pathway interest, and annotation confidence. Every slider is live, the weighting rides in the URL so a ranking can be linked or bookmarked, and the whole table exports as CSV.
-- **A missing measurement is not a zero.** The score is the weighted mean over the signals that actually have data for that gene, so an unmeasured gene is neither punished nor flattered — and each row shows which signals fed it and which were absent.
-- **The selection signals are locked.** ω, DPD, allele counts and the branch-model likelihoods come from the unpublished diabetes cohort dataset published beside this app at `/genes/`, and stay encrypted until the passphrase is entered. Everything else — search, annotation, literature, pathway — works without it.
 
 ## What it does
 

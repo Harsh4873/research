@@ -31,7 +31,6 @@ import { SetShell } from './components/SetShell';
 import { SyncMenu } from './components/SyncMenu';
 import { Landing } from './components/Landing';
 import { ReviewView, type BulkOutcome, type PaperDraft } from './components/ReviewView';
-import { GenesView } from './components/GenesView';
 import { createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
 import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
 
@@ -61,30 +60,16 @@ type Route =
   | { view: 'home' }
   | { view: 'library' }
   | { view: 'review' }
-  | { view: 'genes'; params: Record<string, string> }
   | { view: 'set'; setId: string; mode: Mode };
 
 function parseHash(): Route {
-  const raw = window.location.hash.replace(/^#\/?/, '');
-  // Only the Genes tab carries query state (the chosen gene and the weights).
-  const queryAt = raw.indexOf('?');
-  const path = queryAt === -1 ? raw : raw.slice(0, queryAt);
-  const parts = path.split('/').filter(Boolean);
+  const parts = window.location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'set' && parts[1]) {
     const mode = (MODES as readonly string[]).includes(parts[2]) ? (parts[2] as Mode) : 'notes';
     return { view: 'set', setId: parts[1], mode };
   }
   if (parts[0] === 'recall') return { view: 'library' };
   if (parts[0] === 'review') return { view: 'review' };
-  if (parts[0] === 'genes') {
-    const params: Record<string, string> = {};
-    if (queryAt !== -1) {
-      new URLSearchParams(raw.slice(queryAt + 1)).forEach((value, key) => {
-        if (key) params[key] = value;
-      });
-    }
-    return { view: 'genes', params };
-  }
   return { view: 'home' };
 }
 
@@ -101,8 +86,6 @@ export default function App() {
   dataRef.current = data;
   const [route, setRoute] = useState<Route>(parseHash);
   const [notice, setNotice] = useState<string | null>(null);
-  /** A paper handed over from the Genes tab, to be looked up when Review opens. */
-  const [pendingPaper, setPendingPaper] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'off' });
   const cloudRef = useRef<CloudEngine | null>(null);
 
@@ -433,13 +416,6 @@ export default function App() {
             >
               Review
             </button>
-            <button
-              type="button"
-              className={`header-tab ${route.view === 'genes' ? 'header-tab-active' : ''}`}
-              onClick={() => navigate('/genes')}
-            >
-              Genes
-            </button>
           </nav>
           <div className="header-actions">
             <SyncMenu
@@ -486,26 +462,10 @@ export default function App() {
             onExport={() => exportSet(activeSet)}
             onRefresh={refreshPaper}
           />
-        ) : route.view === 'genes' ? (
-          <GenesView
-            params={route.params}
-            onNavigate={(query) => {
-              const search = new URLSearchParams(query).toString();
-              navigate(search ? `/genes?${search}` : '/genes');
-            }}
-            onImportPaper={(identifier) => {
-              // Hand the paper to Review, which already knows how to fetch and
-              // save one; the Genes tab does not duplicate that pipeline.
-              setPendingPaper(identifier);
-              navigate('/review');
-            }}
-          />
         ) : route.view === 'review' ? (
           <ReviewView
             data={data}
             materialFor={materialFor}
-            handoff={pendingPaper}
-            onHandoffDone={() => setPendingPaper(null)}
             onLookup={lookupPaper}
             onLookupMany={lookupPapers}
             onImportPdf={importPdf}
