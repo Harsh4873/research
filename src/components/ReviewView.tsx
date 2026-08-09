@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -39,9 +39,6 @@ export interface BulkOutcome {
 
 interface ReviewViewProps {
   data: AppData;
-  /** An identifier sent over from the Genes tab; looked up when Review opens. */
-  handoff?: string | null;
-  onHandoffDone?: () => void;
   materialFor: (set: StudySet) => StudyMaterial;
   onLookup: (query: string, onStatus: (status: string) => void) => Promise<PaperDraft>;
   onLookupMany: (text: string, onStatus: (status: string) => void) => Promise<BulkOutcome>;
@@ -93,16 +90,6 @@ export function ReviewView(props: ReviewViewProps) {
     return dois;
   }, [papers]);
   const missingFromBibliography = BIBLIOGRAPHY.filter((entry) => !savedDois.has(entry.doi.toLowerCase())).length;
-
-  // A gene's paper arrives from the Genes tab as an identifier; run it through
-  // the same import path as anything typed here.
-  useEffect(() => {
-    if (!props.handoff) return;
-    setQuery(props.handoff);
-    importText(props.handoff);
-    props.onHandoffDone?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.handoff]);
 
   const run = async (task: (onStatus: (status: string) => void) => Promise<Phase>) => {
     setPhase({ kind: 'working', status: 'Starting…' });

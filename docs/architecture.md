@@ -1,6 +1,6 @@
 # Architecture
 
-Research is a client-side React + Vite single-page app (Recall for notes, Review for papers, Genes for the H37Rv genome); the deployed site is static files on GitHub Pages served under `/research/`. There is no app server. Runtime network I/O is the optional Firebase sync (Google auth + Firestore), which stays completely unloaded until the user turns Sync on; the key-less public literature APIs; and the gene data published by the sibling site at `/genes/`.
+Research is a client-side React + Vite single-page app (Recall for notes, Review for papers); the deployed site is static files on GitHub Pages served under `/research/`. There is no app server. The only runtime network I/O is the optional Firebase sync (Google auth + Firestore), which stays completely unloaded until the user turns Sync on.
 
 ## Pipeline
 
@@ -64,30 +64,9 @@ PDF file           ─→ lib/pdf-import.ts   PDF.js text runs (lazy-loaded)
 
 `SetShell` picks its tab set from the set id: `paper-` sets get Notes / Data / Claims / Find / Skim, everything else keeps the study modes. `components/Inline.tsx` turns DOIs, PMIDs, PMC ids, and bare URLs written as plain text into links, so existing sets gain clickable identifiers without being re-imported.
 
-## Genes (gene → literature → ranking)
-
-The Genes tab reads its data from the **sibling site**, not from this repository. MtbScope is deployed at `/genes/` on the same origin, so `src/lib/gene-catalog.ts` resolves `siblingUrl('genes.json')` by walking one segment up from `import.meta.env.BASE_URL` — `/research/` → `/genes/data/genes.json`. Nothing is duplicated, and the catalog stays whatever MtbScope last published.
-
-```
-/genes/data/genes.json  ─→ lib/gene-catalog.ts   validate and expand the compact records
-/genes/data/selection.enc ─→ lib/lockbox.ts      AES-256-GCM + PBKDF2 → gunzip → JSON
-                        ─→ lib/gene-search.ts    rank a query against symbol, locus, annotation
-                        ─→ lib/gene-literature.ts Europe PMC counts and papers per gene
-                        ─→ lib/gene-priority.ts  weighted multi-signal ranking
-                        ─→ components/GenesView.tsx
-```
-
-- `src/lib/gene-catalog.ts` — validates the published payload rather than trusting it: a record with no locus tag is dropped, an unnamed gene is named by its locus, an unrecognised functional class becomes `unclassified`, and a payload with no usable genes throws `GeneDataError` instead of rendering an empty page. `parseSelection` does the same for the selection dataset, and reads a missing measurement as `null` rather than `0`.
-- `src/lib/lockbox.ts` — the same envelope MtbScope uses (AES-256-GCM, PBKDF2-SHA256 at 600,000 iterations, gzip). The selection dataset is unpublished multi-author work, so it ships encrypted and is decrypted in the browser only after the passphrase is entered; the key is cached under `research.genes.key` so a reload does not ask again. Search, annotation, literature and pathway signals all work without it.
-- `src/lib/gene-search.ts` — a scored lookup rather than a substring filter: exact locus (1000) > exact symbol (900) > symbol prefix > locus prefix > symbol substring > an annotation match requiring *every* term. That ordering is what makes `eccD3` return `Rv0290` itself instead of a gene whose annotation happens to mention it. `findGene` resolves a deep link only on a confident match (score ≥ 500), so `?gene=protein` opens nothing rather than something arbitrary.
-- `src/lib/gene-literature.ts` — Europe PMC search scoped with `TITLE_ABS:` and paired with the organism. Scoping matters: unscoped, `relA` returns 10,390 hits, mostly reference lists; scoped, it returns 214 papers actually about the gene. When the scoped query returns nothing, `geneLiterature` widens to full text so a rarely-named locus still surfaces its papers (`Rv0205`: 0 → 3). Batch counts run through a concurrency limiter over the visible shortlist, not the whole genome.
-- `src/lib/gene-priority.ts` — every signal is scaled to 0–1 and the score is the weighted mean **over the signals that have data for that gene**. Treating an unmeasured signal as zero would rank a well-studied gene below an unmeasured one for no reason, so missing signals are excluded from both numerator and denominator and reported per row. Weights round-trip through the URL (`?w=…`), so a ranking is linkable; an all-zero weighting scores everything 0 rather than dividing by zero.
-
-Handing a paper to Review goes through `App.tsx`: `GenesView` raises the identifier, App stores it as `pendingPaper` and switches tabs, and `ReviewView` imports it once and clears the handoff. Genes owns no storage of its own — nothing it shows is persisted except the cached passphrase.
-
 ## Naming
 
-The app is **Research**; Recall, Review and Genes are its three halves. Only the visible
+The app is **Research**; Recall and Review are its two halves. Only the visible
 naming changed: the persisted keys (`recall.data.v1`, `recall.sync.on`) and the
 Firestore collection (`recall_users`) keep their original names, because
 renaming them would orphan saved data and break the deployed security rules.
@@ -104,6 +83,4 @@ Sync is optional and lazy: `src/lib/cloud.ts` (and the Firebase SDK with it) is 
 
 ## Testing
 
-Vitest (Node environment) covers the parser, extraction heuristics, question building, answer checking, storage round-trips, and the Genes libraries (catalog validation, search ranking, literature query shape, and the scoring rules — including that a missing signal is excluded rather than counted as zero). `npm run build` type-checks then produces `dist/`, which the Pages workflow verifies before deploying.
-
-Genes is also smoke-tested in a real browser against a combined static site — `dist/` mounted at `/research/` beside MtbScope's `dist/` at `/genes/` — because the sibling data path only resolves correctly when both sites sit on one origin.
+Vitest (Node environment) covers the parser, extraction heuristics, question building, answer checking, and storage round-trips. `npm run build` type-checks then produces `dist/`, which the Pages workflow verifies before deploying.
