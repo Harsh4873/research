@@ -1,16 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import type { AppData, StudySet } from '../src/model';
+import type { AppData, StudySet, SyncStatus } from '../src/model';
 import { defaultData, recordAnswer, toggleStar } from '../src/lib/store';
 import {
   applyRemoteProgress,
   applyRemoteSets,
   checkSyncAccount,
+  classifySignInError,
+  describeAuthError,
+  describeSyncError,
   emptyRemoteIndex,
   planPush,
   progressStamp,
   progressToRemote,
   setToRemote,
+  statusAfterSnapshot,
+  syncRetryDelay,
   tombstoneToRemote,
+  SYNC_RETRY_MAX_MS,
   type RemoteIndex,
   type RemoteSet,
 } from '../src/lib/sync-core';
@@ -192,6 +198,138 @@ describe('remote document builders', () => {
     p = recordAnswer(p, 'c', false, 200);
     expect(progressStamp(p)).toBe(300);
     expect(progressStamp({ cards: {} })).toBe(0);
+  });
+});
+
+/**
+ * The shared ruleset pins a set's creation time once the doc exists:
+ *
+ *   request.resource.data.createdAt == resource.data.createdAt
+ *   && request.resource.data.updatedAt >= resource.data.updatedAt
+ *
+ * A push that breaks this is rejected forever, so model it here and check the
+ * documents the client actually plans to write against it.
+ */
+function keepsRecallSetHistory(stored: RemoteSet, outgoing: RemoteSet): boolean {
+  return outgoing.createdAt === stored.createdAt && outgoing.updatedAt >= stored.updatedAt;
+}
+
+describe('createdAt is the cloud’s to keep', () => {
+  it('pushes the stored creation time, not the local one', () => {
+    // Device B made its copy of the same set at a different moment — a content
+    // refresh that renumbers creation time used to deadlock sync right here.
+    const local = { ...makeSet('a', 200), createdAt: 999 };
+    const stored = { ...remoteLive('a', 100), createdAt: 1 };
+    const plan = planPush(dataWith([local]), indexFrom([stored]));
+
+    expect(plan.sets).toHaveLength(1);
+    expect(setToRemote(plan.sets[0]).createdAt).toBe(1);
+    expect(keepsRecallSetHistory(stored, setToRemote(plan.sets[0]))).toBe(true);
+  });
+
+  it('keeps the local creation time when the cloud has no copy yet', () => {
+    const local = { ...makeSet('fresh', 200), createdAt: 999 };
+    const plan = planPush(dataWith([local]), emptyRemoteIndex());
+    expect(setToRemote(plan.sets[0]).createdAt).toBe(999);
+  });
+
+  it('reviving a remotely deleted set keeps the tombstone’s creation time', () => {
+    const local = { ...makeSet('a', 300), createdAt: 999 };
+    const stored = { ...remoteTombstone('a', 200), createdAt: 42 };
+    const plan = planPush(dataWith([local]), indexFrom([stored]));
+
+    expect(plan.sets).toHaveLength(1);
+    expect(keepsRecallSetHistory(stored, setToRemote(plan.sets[0]))).toBe(true);
+  });
+
+  it('adopts the cloud creation time even when the local copy is newer', () => {
+    const local = { ...makeSet('a', 300), createdAt: 999 };
+    const { data, changed } = applyRemoteSets(dataWith([local]), [{ ...remoteLive('a', 100), createdAt: 1 }]);
+    expect(changed).toBe(true);
+    expect(data.sets[0].createdAt).toBe(1);
+    expect(data.sets[0].markdown).toBe('# a'); // the newer local content survives
+    expect(data.sets[0].updatedAt).toBe(300);
+  });
+
+  it('converges: after one snapshot a blind push would still be accepted', () => {
+    const stored = { ...remoteLive('a', 100), createdAt: 1 };
+    const local = { ...makeSet('a', 300), createdAt: 999 };
+    // Snapshot first, then push with an index that has not been filled in yet.
+    const { data } = applyRemoteSets(dataWith([local]), [stored]);
+    const plan = planPush(data, emptyRemoteIndex());
+    expect(keepsRecallSetHistory(stored, setToRemote(plan.sets[0]))).toBe(true);
+  });
+});
+
+describe('failures recover', () => {
+  it('backs off further after each failure and then stops growing', () => {
+    expect(syncRetryDelay(0)).toBe(0);
+    expect(syncRetryDelay(1)).toBe(2_000);
+    expect(syncRetryDelay(2)).toBe(4_000);
+    expect(syncRetryDelay(3)).toBe(8_000);
+    expect(syncRetryDelay(4)).toBe(16_000);
+    expect(syncRetryDelay(5)).toBe(SYNC_RETRY_MAX_MS);
+    expect(syncRetryDelay(400)).toBe(SYNC_RETRY_MAX_MS);
+  });
+
+  it('lets a later snapshot clear an error instead of freezing the session', () => {
+    const failed: SyncStatus = { state: 'error', email: 'owner@example.test', error: 'Sync failed (internal).' };
+    const next = statusAfterSnapshot(failed, {
+      pendingWrites: false,
+      pushing: false,
+      retrying: false,
+      email: 'owner@example.test',
+    });
+    expect(next).toEqual({ state: 'synced', email: 'owner@example.test' });
+  });
+
+  it('says syncing, not synced, while a failed write waits on its backoff', () => {
+    const failed: SyncStatus = { state: 'error', error: 'Sync failed (internal).' };
+    const next = statusAfterSnapshot(failed, { pendingWrites: false, pushing: false, retrying: true });
+    expect(next.state).toBe('syncing');
+    expect(next.error).toBeUndefined();
+  });
+
+  it('keeps an account the rules will never accept on screen', () => {
+    const wrong: SyncStatus = { state: 'error', error: 'Verify the address.', wrongAccount: true };
+    expect(statusAfterSnapshot(wrong, { pendingWrites: false, pushing: false, retrying: false })).toBe(wrong);
+  });
+
+  it('never tells anyone to redeploy the rules over a denied request', () => {
+    const denied = describeSyncError('permission-denied');
+    expect(denied).not.toMatch(/deploy|firestore\.rules|npm run/i);
+    expect(denied).toMatch(/retr/i);
+    expect(describeSyncError('unavailable')).toMatch(/offline/i);
+    expect(describeSyncError('')).toMatch(/unknown error/i);
+    expect(describeSyncError('firestore/permission-denied')).toBe(denied);
+  });
+});
+
+describe('sign-in errors', () => {
+  it('treats a cancelled popup request as a cancellation, not a popup block', () => {
+    // Both codes contain "popup"; matching on that substring made this branch
+    // unreachable and sent anyone who dismissed the window off to a redirect.
+    expect(classifySignInError('auth/cancelled-popup-request')).toBe('cancelled');
+    expect(classifySignInError('auth/popup-closed-by-user')).toBe('cancelled');
+    expect(classifySignInError('auth/user-cancelled')).toBe('cancelled');
+  });
+
+  it('redirects only when the browser refused the window', () => {
+    expect(classifySignInError('auth/popup-blocked')).toBe('redirect');
+    expect(classifySignInError('auth/operation-not-supported-in-this-environment')).toBe('redirect');
+  });
+
+  it('reports anything else as a failure', () => {
+    expect(classifySignInError('auth/unauthorized-domain')).toBe('failed');
+    expect(classifySignInError('')).toBe('failed');
+  });
+
+  it('explains a redirect that came back rejected', () => {
+    expect(describeAuthError('auth/unauthorized-domain')).toMatch(/domain/i);
+    expect(describeAuthError('auth/operation-not-allowed')).toMatch(/switched off/i);
+    expect(describeAuthError('auth/network-request-failed')).toMatch(/connection/i);
+    expect(describeAuthError('auth/weird-new-code')).toContain('auth/weird-new-code');
+    expect(describeAuthError('')).toMatch(/unknown error/i);
   });
 });
 

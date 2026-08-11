@@ -69,4 +69,4 @@ npm run dev
    npm run deploy:rules             # firebase deploy --only firestore:rules --project pickledgerpro
    ```
 
-   The rules file is the complete ruleset for every app in the project, so keep it byte-identical across Gym, Daymark, Slate, Fare, Notes, and Research — deploying from any of them replaces the project rules. If Sync reports a permission error, confirm this complete file is the deployed policy.
+   The rules file is the complete ruleset for every app in the project, so keep it byte-identical across Gym, Daymark, Slate, Fare, Notes, and Research — deploying from any of them replaces the project rules. Deploy only when this file itself has changed: a permission error in Sync is nearly always the signed-in account rather than the policy, it retries on its own, and signing out and back in with a verified Google account clears it.

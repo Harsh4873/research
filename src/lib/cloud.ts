@@ -19,10 +19,15 @@ import {
   applyRemoteProgress,
   applyRemoteSets,
   checkSyncAccount,
+  classifySignInError,
+  describeAuthError,
+  describeSyncError,
   emptyRemoteIndex,
   planPush,
   progressToRemote,
   setToRemote,
+  statusAfterSnapshot,
+  syncRetryDelay,
   tombstoneToRemote,
   type RemoteIndex,
   type RemoteProgress,
@@ -48,6 +53,14 @@ class CloudEngine {
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private pushing = false;
   private status: SyncStatus = { state: 'connecting' };
+  /** Consecutive write failures, and the moment the next push may run. */
+  private writeFailures = 0;
+  private retryAt = 0;
+  /** Consecutive listener failures, and the pending re-listen. */
+  private readFailures = 0;
+  private relistenTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A sign-in failure survives the signed-out auth callback that follows it. */
+  private authError: string | null = null;
 
   constructor(handlers: CloudHandlers) {
     this.handlers = handlers;
@@ -67,14 +80,19 @@ class CloudEngine {
   private async boot() {
     this.setStatus({ state: 'connecting' });
     await authPersistenceReady.catch(() => undefined);
-    await getRedirectResult(firebaseAuth).catch(() => undefined);
+    // A redirect that came back rejected (an unauthorized domain, a disabled
+    // provider) has no other way to reach the person who started it — the auth
+    // callback below reports a plain signed-out session. Keep the reason.
+    await getRedirectResult(firebaseAuth).catch((error) => this.failAuth(error));
     onAuthStateChanged(firebaseAuth, (user) => {
       this.teardownListeners();
       if (!user) {
         this.user = null;
-        this.setStatus({ state: 'off' });
+        if (this.authError) this.setStatus({ state: 'error', error: this.authError });
+        else this.setStatus({ state: 'off' });
         return;
       }
+      this.authError = null;
       const check = checkSyncAccount(user.email, user.emailVerified);
       if (!check.ok) {
         // Stay signed in so the address is visible, but never read, write, or
@@ -98,6 +116,10 @@ class CloudEngine {
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
     this.index = emptyRemoteIndex();
+    if (this.relistenTimer) {
+      clearTimeout(this.relistenTimer);
+      this.relistenTimer = null;
+    }
   }
 
   private listen(user: User) {
@@ -124,7 +146,7 @@ class CloudEngine {
           this.handlers.onRemote((data) => applyRemoteSets(data, remote).data);
           this.afterSnapshot(snap.metadata.hasPendingWrites, email);
         },
-        (error) => this.fail(error, email),
+        (error) => this.failListener(error, user),
       ),
       onSnapshot(
         progressRef,
@@ -142,31 +164,59 @@ class CloudEngine {
           });
           this.afterSnapshot(snap.metadata.hasPendingWrites, email);
         },
-        (error) => this.fail(error, email),
+        (error) => this.failListener(error, user),
       ),
     );
   }
 
+  /**
+   * A snapshot proves reads still work, so it retires a stale error instead of
+   * leaving the badge stuck for the rest of the session. A write waiting on its
+   * backoff keeps the state at "syncing" rather than claiming everything landed.
+   */
   private afterSnapshot(pendingWrites: boolean, email?: string) {
-    if (this.status.state === 'error') return;
-    this.setStatus({ state: pendingWrites || this.pushing ? 'syncing' : 'synced', email });
+    this.readFailures = 0;
+    this.setStatus(
+      statusAfterSnapshot(this.status, {
+        pendingWrites,
+        pushing: this.pushing,
+        retrying: this.retryAt > Date.now(),
+        email,
+      }),
+    );
     if (this.latest) this.schedulePush();
   }
 
+  /** A rejected write: report it, then try again on a widening backoff. */
   private fail(error: unknown, email?: string) {
     const code = (error as { code?: string })?.code ?? '';
-    if (code.includes('permission-denied')) {
-      this.setStatus({
-        state: 'error',
-        email,
-        error: 'Firestore denied the request. Confirm this is a verified Google session and deploy the complete shared firestore.rules file (npm run deploy:rules).',
-      });
-      return;
-    }
-    const message = code.includes('unavailable')
-      ? 'Offline — changes will sync when the connection returns.'
-      : `Sync failed (${code || 'unknown error'}).`;
-    this.setStatus({ state: 'error', email, error: message });
+    this.writeFailures += 1;
+    this.retryAt = Date.now() + syncRetryDelay(this.writeFailures);
+    this.setStatus({ state: 'error', email, error: describeSyncError(code) });
+    if (this.user) this.schedulePush();
+  }
+
+  /**
+   * A rejected listener: Firestore drops the listener for good, so re-open it
+   * after a backoff. Without this a single blip ends syncing until a reload.
+   */
+  private failListener(error: unknown, user: User) {
+    this.readFailures += 1;
+    const delay = syncRetryDelay(this.readFailures);
+    const code = (error as { code?: string })?.code ?? '';
+    this.teardownListeners();
+    this.setStatus({ state: 'error', email: user.email ?? undefined, error: describeSyncError(code) });
+    this.relistenTimer = setTimeout(() => {
+      this.relistenTimer = null;
+      if (this.user === user) this.listen(user);
+    }, delay);
+  }
+
+  /** A sign-in failure, which needs the person to act rather than a retry. */
+  private failAuth(error: unknown) {
+    const code = (error as { code?: string })?.code ?? '';
+    this.authError = describeAuthError(code);
+    this.setStatus({ state: 'error', error: this.authError });
   }
 
   /** Called on every local data change; diffs against the remote index. */
@@ -176,13 +226,27 @@ class CloudEngine {
     this.schedulePush();
   }
 
-  private schedulePush() {
+  /** Never earlier than the backoff a failed write is still serving. */
+  private schedulePush(delayMs = PUSH_DEBOUNCE_MS) {
+    const wait = Math.max(delayMs, this.retryAt - Date.now());
     if (this.pushTimer) clearTimeout(this.pushTimer);
-    this.pushTimer = setTimeout(() => void this.flush(), PUSH_DEBOUNCE_MS);
+    this.pushTimer = setTimeout(() => void this.flush(), wait);
+  }
+
+  /** Everything local is in the cloud: drop the backoff and any stale error. */
+  private settle(email?: string) {
+    this.writeFailures = 0;
+    this.retryAt = 0;
+    if (this.relistenTimer) return; // reads are still down — keep that on screen
+    if (this.status.state !== 'synced') this.setStatus({ state: 'synced', email });
   }
 
   private async flush() {
     if (!this.user || !this.latest || this.pushing) return;
+    if (Date.now() < this.retryAt) {
+      this.schedulePush(this.retryAt - Date.now());
+      return;
+    }
     const user = this.user;
     const plan = planPush(this.latest, this.index);
     if (plan.sets.length === 0 && plan.tombstones.length === 0 && plan.progress.length === 0) {
@@ -192,7 +256,9 @@ class CloudEngine {
           email: user.email ?? undefined,
           error: 'One set is too large to sync (over ~600 KB of markdown). It stays local-only.',
         });
+        return;
       }
+      this.settle(user.email ?? undefined);
       return;
     }
     this.pushing = true;
@@ -220,7 +286,7 @@ class CloudEngine {
       }
       await Promise.all(writes);
       this.pushing = false;
-      this.setStatus({ state: 'synced', email: user.email ?? undefined });
+      this.settle(user.email ?? undefined);
       // Re-check in case more changes landed while writing.
       this.schedulePush();
     } catch (error) {
@@ -230,21 +296,27 @@ class CloudEngine {
   }
 
   async signIn(): Promise<void> {
+    this.authError = null;
+    this.writeFailures = 0;
+    this.readFailures = 0;
+    this.retryAt = 0;
     this.setStatus({ state: 'connecting' });
     try {
       await signInWithPopup(firebaseAuth, googleProvider);
     } catch (error) {
       const code = (error as { code?: string })?.code ?? '';
-      if (code.includes('popup')) {
-        // Popup blocked (common in installed PWAs) — fall back to a redirect.
-        await signInWithRedirect(firebaseAuth, googleProvider).catch((e) => this.fail(e));
-        return;
+      switch (classifySignInError(code)) {
+        case 'cancelled':
+          // Closing the Google window means "not now" — stay put.
+          this.setStatus({ state: 'off' });
+          return;
+        case 'redirect':
+          // Popup blocked (common in installed PWAs) — fall back to a redirect.
+          await signInWithRedirect(firebaseAuth, googleProvider).catch((e) => this.failAuth(e));
+          return;
+        default:
+          this.failAuth(error);
       }
-      if (code.includes('cancelled') || code.includes('closed-by-user')) {
-        this.setStatus({ state: 'off' });
-        return;
-      }
-      this.fail(error);
     }
   }
 
@@ -259,6 +331,10 @@ class CloudEngine {
 
   async signOut(): Promise<void> {
     this.teardownListeners();
+    this.authError = null;
+    this.writeFailures = 0;
+    this.readFailures = 0;
+    this.retryAt = 0;
     await firebaseSignOut(firebaseAuth).catch(() => undefined);
     this.setStatus({ state: 'off' });
   }

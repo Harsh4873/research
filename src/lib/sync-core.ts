@@ -1,4 +1,4 @@
-import type { AppData, CardProgress, SetProgress, StudySet } from '../model';
+import type { AppData, CardProgress, SetProgress, StudySet, SyncStatus } from '../model';
 
 /** Firestore document shapes for `recall_users/{uid}/sets` and `/progress`. */
 export interface RemoteSet {
@@ -143,6 +143,12 @@ export function applyRemoteSets(data: AppData, remote: RemoteSet[]): { data: App
     } else if (incoming.updatedAt > local.updatedAt) {
       sets = sets.map((s) => (s.id === r.id ? incoming : s));
       changed = true;
+    } else if (local.createdAt !== incoming.createdAt) {
+      // The cloud copy owns creation time — the rules pin `createdAt` immutable
+      // once a set doc exists. Adopt it even when the local copy is the newer
+      // one, so the two devices stop disagreeing about when the set was made.
+      sets = sets.map((s) => (s.id === r.id ? { ...s, createdAt: incoming.createdAt } : s));
+      changed = true;
     }
   }
 
@@ -205,7 +211,14 @@ export interface PushPlan {
   oversized: string[];
 }
 
-/** Work out what local state is strictly newer than the last-known remote. */
+/**
+ * Work out what local state is strictly newer than the last-known remote.
+ *
+ * A set that already exists in the cloud is planned with the cloud's own
+ * `createdAt`: the ruleset pins creation time immutable, so pushing a local
+ * `createdAt` that another device never saw is rejected forever. Creation time
+ * is the cloud's to keep; only the content and `updatedAt` are ours to change.
+ */
 export function planPush(data: AppData, index: RemoteIndex): PushPlan {
   const plan: PushPlan = { sets: [], tombstones: [], progress: [], oversized: [] };
 
@@ -214,7 +227,7 @@ export function planPush(data: AppData, index: RemoteIndex): PushPlan {
     const remoteStamp = meta ? (meta.deleted ? tombstoneTime(meta) : meta.updatedAt) : -1;
     if (set.updatedAt > remoteStamp) {
       if (set.markdown.length > MAX_REMOTE_MARKDOWN) plan.oversized.push(set.id);
-      else plan.sets.push(set);
+      else plan.sets.push(meta ? { ...set, createdAt: meta.createdAt } : set);
     }
   }
 
@@ -274,4 +287,116 @@ export function progressToRemote(setId: string, progress: SetProgress, updatedAt
   const doc: RemoteProgress = { setId, cards, updatedAt: Math.round(updatedAt) };
   if (progress.bestMatchMs && progress.bestMatchMs > 0) doc.bestMatchMs = Math.round(progress.bestMatchMs);
   return doc;
+}
+
+/* ---------- Failure handling ---------- */
+
+export const SYNC_RETRY_BASE_MS = 2_000;
+export const SYNC_RETRY_MAX_MS = 30_000;
+
+/**
+ * How long to wait before retrying after `failures` consecutive failures.
+ * Doubles each time and stops at {@link SYNC_RETRY_MAX_MS} so a failure that
+ * never clears costs one attempt a minute rather than freezing sync for good.
+ */
+export function syncRetryDelay(failures: number): number {
+  if (failures <= 0) return 0;
+  const exponent = Math.min(failures - 1, 20);
+  return Math.min(SYNC_RETRY_BASE_MS * 2 ** exponent, SYNC_RETRY_MAX_MS);
+}
+
+/** Firestore and Auth report `code` as `permission-denied` or `auth/…`. */
+function bareCode(code: string): string {
+  const trimmed = (code ?? '').trim();
+  const slash = trimmed.lastIndexOf('/');
+  return slash === -1 ? trimmed : trimmed.slice(slash + 1);
+}
+
+/**
+ * Explain a failed Firestore read or write. Never tells the owner to redeploy
+ * the ruleset: a rejection is nearly always this session or this document, and
+ * sending someone to re-publish a correct policy hides the real problem.
+ */
+export function describeSyncError(code: string): string {
+  switch (bareCode(code)) {
+    case 'permission-denied':
+      return 'Firestore turned down this request for the signed-in account. Sync retries on its own; if it keeps failing, sign out and back in with a verified Google account.';
+    case 'unauthenticated':
+      return 'The Google session expired. Sign out and back in to resume syncing.';
+    case 'unavailable':
+    case 'deadline-exceeded':
+      return 'Offline — changes will sync when the connection returns.';
+    case 'resource-exhausted':
+      return 'Firestore is rate limiting this account. Sync will slow down and try again.';
+    case 'failed-precondition':
+      return 'Firestore could not use this browser session. Close other tabs of Research and try again.';
+    default:
+      return `Sync failed (${bareCode(code) || 'unknown error'}). Retrying…`;
+  }
+}
+
+/** What to do about a `signInWithPopup` rejection. */
+export type SignInOutcome = 'cancelled' | 'redirect' | 'failed';
+
+/**
+ * Auth codes are matched exactly. Substring matching cannot work here:
+ * `auth/cancelled-popup-request` contains "popup" as well, so a "does it
+ * mention a popup" test swallows every cancellation and pushes the person
+ * through a redirect they never asked for.
+ */
+export function classifySignInError(code: string): SignInOutcome {
+  switch (code) {
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+    case 'auth/user-cancelled':
+      return 'cancelled';
+    case 'auth/popup-blocked':
+    case 'auth/operation-not-supported-in-this-environment':
+    case 'auth/web-storage-unsupported':
+      return 'redirect';
+    default:
+      return 'failed';
+  }
+}
+
+/** Explain a Google sign-in failure, including one returned by a redirect. */
+export function describeAuthError(code: string): string {
+  switch (code) {
+    case 'auth/unauthorized-domain':
+      return 'Google sign-in is not allowed from this domain. Add it to the Firebase Authentication authorized domains.';
+    case 'auth/operation-not-allowed':
+      return 'Google sign-in is switched off for this Firebase project.';
+    case 'auth/network-request-failed':
+      return 'Could not reach Google to finish signing in. Check the connection and try again.';
+    case 'auth/popup-blocked':
+      return 'The browser blocked the Google sign-in window. Allow pop-ups for this site, or try again.';
+    case 'auth/account-exists-with-different-credential':
+      return 'That address is already signed up with a different provider. Use the original sign-in method.';
+    case 'auth/invalid-api-key':
+    case 'auth/api-key-not-valid':
+      return 'This build has an invalid Firebase API key, so sign-in cannot start.';
+    default:
+      return `Google sign-in failed (${code || 'unknown error'}).`;
+  }
+}
+
+/** Inputs a snapshot carries about how far behind the local copy is. */
+export interface SnapshotState {
+  pendingWrites: boolean;
+  pushing: boolean;
+  /** A failed write is waiting on its backoff. */
+  retrying: boolean;
+  email?: string;
+}
+
+/**
+ * Status after a snapshot arrives. A snapshot proves reads work, so it clears a
+ * stale error — otherwise one blip freezes the badge for the whole session. The
+ * exception is an account the rules will never accept, which no amount of
+ * incoming data can fix.
+ */
+export function statusAfterSnapshot(current: SyncStatus, snapshot: SnapshotState): SyncStatus {
+  if (current.state === 'error' && current.wrongAccount === true) return current;
+  const busy = snapshot.pendingWrites || snapshot.pushing || snapshot.retrying;
+  return { state: busy ? 'syncing' : 'synced', email: snapshot.email };
 }

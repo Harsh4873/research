@@ -133,12 +133,20 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
+/*
+ * The header is the one row on every screen, and its three groups add up to
+ * more than a phone is wide. `flex-wrap: wrap` is what keeps that from turning
+ * into sideways page scroll: without a wrap opportunity the row cannot shrink
+ * past its own words and simply overflows the viewport.
+ */
 .header-inner {
   width: min(1060px, 100% - 32px);
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 6px;
   padding: 10px 0;
 }
 
@@ -166,6 +174,17 @@ button {
   background: linear-gradient(135deg, var(--accent), #8b5cf6);
   color: #fff;
   box-shadow: var(--shadow);
+}
+
+/* Sync and theme sit side by side, and wrap rather than push the page wide. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
 }
 
 .app-footer {
@@ -2813,6 +2832,38 @@ textarea.review-input {
 }
 
 @media (max-width: 560px) {
+  /*
+   * Phone header: the brand and the sync/theme buttons share the top row and
+   * the section tabs take the row below, so nothing has to overflow. At 390px
+   * the top row needs about 300px of the 358px available.
+   */
+  .header-inner {
+    column-gap: 8px;
+  }
+
+  .brand {
+    font-size: 17px;
+    gap: 8px;
+    padding: 4px 2px;
+  }
+
+  .brand-badge {
+    width: 26px;
+    height: 26px;
+  }
+
+  .header-nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    justify-content: center;
+  }
+
+  .header-tab {
+    flex: 1;
+    padding: 6px 12px;
+  }
+
   .note-composer-heading,
   .note-composer-footer {
     align-items: stretch;
