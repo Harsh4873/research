@@ -139,7 +139,6 @@ export function Library({ data, materialFor, onImport, onLoadSample, onDelete, o
                   <button type="button" className="set-card-main" onClick={() => onOpen(set)}>
                     <div className="set-card-title">{set.title}</div>
                     <div className="set-card-meta">
-                      {set.id.startsWith('bundled-') && <span className="meta-chip">Included notes</span>}
                       <span className="meta-chip">{material.stats.terms} terms</span>
                       <span className="meta-chip">{material.stats.clozes} blanks</span>
                       <span className="meta-chip">{material.stats.readingMinutes} min</span>

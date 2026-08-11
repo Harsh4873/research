@@ -25,7 +25,6 @@ import {
   writeActiveAccountId,
 } from './lib/store';
 import { SAMPLE_MARKDOWN, SAMPLE_TITLE } from './lib/sample';
-import { withBundledSets } from './lib/bundled';
 import { Library, type ImportItem } from './components/Library';
 import { SetShell } from './components/SetShell';
 import { SyncMenu } from './components/SyncMenu';
@@ -79,8 +78,8 @@ function navigate(hash: string) {
 
 export default function App() {
   const activeAccountRef = useRef<string | null>(readActiveAccountId());
-  const [data, setData] = useState<AppData>(() => withBundledSets(
-    activeAccountRef.current ? loadAccountData(activeAccountRef.current) : loadData(),
+  const [data, setData] = useState<AppData>(() => (
+    activeAccountRef.current ? loadAccountData(activeAccountRef.current) : loadData()
   ));
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -105,7 +104,7 @@ export default function App() {
           saveAccountData(uid, dataRef.current);
         }
 
-        const next = withBundledSets(loadAccountData(uid));
+        const next = loadAccountData(uid);
         activeAccountRef.current = uid;
         writeActiveAccountId(uid);
         dataRef.current = next;
