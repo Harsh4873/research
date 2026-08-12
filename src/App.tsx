@@ -11,9 +11,9 @@ import {
   deleteSet,
   exportSetJson,
   getProgress,
-  hasAccountData,
   loadAccountData,
   loadData,
+  loadOrAdoptOwnerVaultData,
   nextDataTimestamp,
   parseSetExport,
   readActiveAccountId,
@@ -94,21 +94,22 @@ export default function App() {
     const { startCloud } = await import('./lib/cloud');
     const engine = startCloud({
       onStatus: setSyncStatus,
-      onAccount: (uid) => {
+      onAccount: (vaultId, legacyUid) => {
         const previousUid = activeAccountRef.current;
-        if (previousUid === uid) return dataRef.current;
+        if (previousUid === vaultId) return dataRef.current;
 
         if (previousUid) {
           saveAccountData(previousUid, dataRef.current);
-        } else if (!hasAccountData(uid)) {
-          // The first sign-in after this upgrade adopts the legacy local-only
-          // library. Later account switches always load a separate cache.
-          saveAccountData(uid, dataRef.current);
         }
 
-        const next = loadAccountData(uid);
-        activeAccountRef.current = uid;
-        writeActiveAccountId(uid);
+        const next = loadOrAdoptOwnerVaultData(
+          vaultId,
+          legacyUid,
+          previousUid,
+          dataRef.current,
+        );
+        activeAccountRef.current = vaultId;
+        writeActiveAccountId(vaultId);
         dataRef.current = next;
         setData(next);
         return next;

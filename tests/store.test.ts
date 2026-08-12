@@ -8,6 +8,7 @@ import {
   hasAccountData,
   loadAccountData,
   loadData,
+  loadOrAdoptOwnerVaultData,
   masteryPercent,
   memoryStorage,
   nextDataTimestamp,
@@ -75,6 +76,59 @@ describe('persistence round-trip', () => {
     expect(loadAccountData('uid-one', storage).sets[0].title).toBe('First');
     expect(loadAccountData('uid-two', storage).sets[0].title).toBe('Second');
     expect(readActiveAccountId(storage)).toBe('uid-two');
+  });
+
+  it('adopts the authenticated legacy account cache into the shared vault once', () => {
+    const storage = memoryStorage();
+    const legacy = upsertSet(defaultData(), createSet('Legacy reader', '# Kept', 10));
+    saveAccountData('legacy-uid', legacy, storage);
+
+    const adopted = loadOrAdoptOwnerVaultData(
+      'shared-vault',
+      'legacy-uid',
+      'legacy-uid',
+      legacy,
+      storage,
+    );
+    expect(adopted.sets[0].title).toBe('Legacy reader');
+
+    const laterLegacy = upsertSet(legacy, createSet('Do not replay', '# Old cache', 20));
+    expect(loadOrAdoptOwnerVaultData(
+      'shared-vault',
+      'legacy-uid',
+      'legacy-uid',
+      laterLegacy,
+      storage,
+    ).sets).toHaveLength(1);
+  });
+
+  it('can recover the authenticated UID cache when another account was last active', () => {
+    const storage = memoryStorage();
+    const owner = upsertSet(defaultData(), createSet('Owner cache', '# Owner', 10));
+    const unrelated = upsertSet(defaultData(), createSet('Other cache', '# Other', 11));
+    saveAccountData('owner-uid', owner, storage);
+
+    const adopted = loadOrAdoptOwnerVaultData(
+      'shared-vault',
+      'owner-uid',
+      'other-uid',
+      unrelated,
+      storage,
+    );
+    expect(adopted.sets.map((set) => set.title)).toEqual(['Owner cache']);
+  });
+
+  it('does not import a local cache tied only to a different legacy account', () => {
+    const storage = memoryStorage();
+    const unrelated = upsertSet(defaultData(), createSet('Other cache', '# Other', 11));
+    const adopted = loadOrAdoptOwnerVaultData(
+      'shared-vault',
+      'owner-uid',
+      'other-uid',
+      unrelated,
+      storage,
+    );
+    expect(adopted).toEqual(defaultData());
   });
 });
 

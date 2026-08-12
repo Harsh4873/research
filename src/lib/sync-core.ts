@@ -1,6 +1,6 @@
 import type { AppData, CardProgress, SetProgress, StudySet, SyncStatus } from '../model';
 
-/** Firestore document shapes for `recall_users/{uid}/sets` and `/progress`. */
+/** Firestore document shapes for `recall_users/{vaultId}/sets` and `/progress`. */
 export interface RemoteSet {
   id: string;
   title: string;
@@ -46,9 +46,10 @@ export interface AccountCheck {
 }
 
 /**
- * Each account owns an independent `recall_users/{uid}` library. Check the
- * claims needed by the Firestore policy before opening listeners so an invalid
- * session gets a useful message instead of a bare `permission-denied`.
+ * Both approved identities resolve to the same `recall_users/{vaultId}`
+ * library. Check the claims needed by the Firestore policy before opening
+ * listeners so an invalid session gets a useful message instead of a bare
+ * `permission-denied`.
  */
 export function checkSyncAccount(
   email: string | null | undefined,

@@ -40,13 +40,13 @@ All lookups use free, key-less public APIs (Europe PMC and NCBI E-utilities) str
 - Study modes: **Notes** (rendered outline + glossary), **Flashcards** (flip, star, self-grade), **Quiz** (multiple choice with distractors), **Blanks** (typed answers with fuzzy matching and hints), and **Match** (timed pairing game).
 - Tracks per-card mastery (learning → almost → mastered) and per-set progress, with a "focus weak cards" filter in every mode.
 - Exports and re-imports sets as JSON.
-- Optional cross-device sync: sets and progress replicate through a private UID-scoped Firebase workspace, with tombstoned deletes and last-writer-wins merging.
+- Optional cross-device sync: sets and progress replicate through the provisioned shared private owner vault, with tombstoned deletes and last-writer-wins merging.
 
 ## Privacy boundary
 
-By default generation and storage run in the browser: notes, generated cards, and progress live in `localStorage` on the device. If a user starts dictation, speech recognition is provided by the browser and may use its configured speech service; Recall does not store audio. Turning on **Sync** signs in with a verified Google account and replicates sets and progress to that account's private path (`recall_users/{uid}/…` in Firestore). There are no analytics.
+By default generation and storage run in the browser: notes, generated cards, and progress live in `localStorage` on the device. If a user starts dictation, speech recognition is provided by the browser and may use its configured speech service; Recall does not store audio. Turning on **Sync** signs in with a verified, provisioned Google account and resolves it to `recall_users/{vaultId}/…` in Firestore. Both approved identities see the same data; unprovisioned identities fail closed. There are no analytics.
 
-Every Google account gets its own `recall_users/{uid}` silo. The same account sees the same library across browsers and devices; a different account starts with a separate library and cannot access another UID's data.
+Only the two provisioned, verified Google identities can resolve the private owner membership. Both identities use the same `recall_users/{vaultId}` library across browsers and devices; every unprovisioned account is rejected before private listeners start.
 
 ## Local development
 
@@ -69,4 +69,4 @@ npm run dev
    npm run deploy:rules             # firebase deploy --only firestore:rules --project pickledgerpro
    ```
 
-   The rules file is the complete ruleset for every app in the project, so keep it byte-identical across Gym, Daymark, Slate, Fare, Notes, and Research — deploying from any of them replaces the project rules. Deploy only when this file itself has changed: a permission error in Sync is nearly always the signed-in account rather than the policy, it retries on its own, and signing out and back in with a verified Google account clears it.
+   The rules file is the complete ruleset for every private app in the project, so keep it byte-identical across Gym, Daymark, Slate, Fare, Notes, Research, Degree, Studies, and Radar — deploying from any of them replaces the project rules. Deploy only when this file itself has changed.

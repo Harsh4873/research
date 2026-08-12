@@ -7,7 +7,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import { readFile } from 'node:fs/promises';
 import { deleteDoc, doc, getDoc, setDoc } from 'firebase/firestore';
-import { afterAll, afterEach, beforeAll, describe, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, it } from 'vitest';
 
 const PROJECT_ID = 'demo-research';
 const OWNER_UID = 'recall-owner';
@@ -64,6 +64,14 @@ describe.skipIf(!EMULATOR_ADDRESS)('recall Firestore security rules', () => {
     });
   });
 
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'owner_vault_members', OWNER_UID), {
+        vaultId: OWNER_UID, schemaVersion: 1, status: 'active', legacyWritesEnabled: false,
+      });
+    });
+  });
+
   afterEach(async () => env.clearFirestore());
   afterAll(async () => env.cleanup());
 
@@ -101,11 +109,11 @@ describe.skipIf(!EMULATOR_ADDRESS)('recall Firestore security rules', () => {
       await assertFails(setDoc(setDocRef(context), validSet({ updatedAt: 4000 })));
     });
 
-    it('allows another verified Google account to use its own UID-scoped workspace', async () => {
+    it('denies an unapproved verified Google account a Firebase workspace', async () => {
       const secondUid = 'second-recall-user';
       const secondUser = authorizedContext(env, secondUid, { email: 'someone@example.com' });
-      await assertSucceeds(setDoc(setDocRef(secondUser, secondUid), validSet()));
-      await assertSucceeds(getDoc(setDocRef(secondUser, secondUid)));
+      await assertFails(setDoc(setDocRef(secondUser, secondUid), validSet()));
+      await assertFails(getDoc(setDocRef(secondUser, secondUid)));
     });
 
     it('denies other uids, unverified emails, non-Google providers, and signed-out access', async () => {

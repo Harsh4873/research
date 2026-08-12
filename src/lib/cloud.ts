@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { authPersistenceReady, firebaseAuth, googleProvider, recallFirestore } from '../firebase';
 import type { AppData, SyncStatus } from '../model';
+import { resolveOwnerVault } from '../owner-vault';
 import {
   applyRemoteProgress,
   applyRemoteSets,
@@ -36,8 +37,8 @@ import {
 
 export interface CloudHandlers {
   onStatus: (status: SyncStatus) => void;
-  /** Switch browser-local state to the authenticated account before listening. */
-  onAccount: (uid: string) => AppData;
+  /** Switch browser-local state to the shared vault before listening. */
+  onAccount: (vaultId: string, legacyUid: string) => AppData;
   /** Fold remote changes into app state; must return same-reference data when nothing changed. */
   onRemote: (fold: (data: AppData) => AppData) => void;
 }
@@ -49,6 +50,7 @@ class CloudEngine {
   private index: RemoteIndex = emptyRemoteIndex();
   private unsubs: Unsubscribe[] = [];
   private user: User | null = null;
+  private vaultId: string | null = null;
   private latest: AppData | null = null;
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private pushing = false;
@@ -90,6 +92,7 @@ class CloudEngine {
       const revision = ++this.authRevision;
       this.teardownListeners();
       this.user = null;
+      this.vaultId = null;
       if (!user) {
         if (this.authError) this.setStatus({ state: 'error', error: this.authError });
         else this.setStatus({ state: 'off' });
@@ -128,9 +131,24 @@ class CloudEngine {
       });
       return;
     }
-    this.latest = this.handlers.onAccount(user.uid);
+    let membership;
+    try {
+      membership = await resolveOwnerVault(recallFirestore, user);
+    } catch (error) {
+      if (revision !== this.authRevision || firebaseAuth.currentUser !== user) return;
+      this.setStatus({
+        state: 'error',
+        email: user.email ?? undefined,
+        error: error instanceof Error ? error.message : 'This account cannot access the shared owner vault.',
+        wrongAccount: true,
+      });
+      return;
+    }
+    if (revision !== this.authRevision || firebaseAuth.currentUser !== user) return;
+    this.latest = this.handlers.onAccount(membership.vaultId, user.uid);
     this.user = user;
-    this.listen(user);
+    this.vaultId = membership.vaultId;
+    this.listen(user, membership.vaultId);
   }
 
   private teardownListeners() {
@@ -143,11 +161,11 @@ class CloudEngine {
     }
   }
 
-  private listen(user: User) {
+  private listen(user: User, vaultId: string) {
     const email = user.email ?? undefined;
     this.setStatus({ state: 'syncing', email });
-    const setsRef = collection(recallFirestore, 'recall_users', user.uid, 'sets');
-    const progressRef = collection(recallFirestore, 'recall_users', user.uid, 'progress');
+    const setsRef = collection(recallFirestore, 'recall_users', vaultId, 'sets');
+    const progressRef = collection(recallFirestore, 'recall_users', vaultId, 'progress');
 
     this.unsubs.push(
       onSnapshot(
@@ -229,7 +247,7 @@ class CloudEngine {
     this.setStatus({ state: 'error', email: user.email ?? undefined, error: describeSyncError(code) });
     this.relistenTimer = setTimeout(() => {
       this.relistenTimer = null;
-      if (this.user === user) this.listen(user);
+      if (this.user === user && this.vaultId) this.listen(user, this.vaultId);
     }, delay);
   }
 
@@ -263,12 +281,13 @@ class CloudEngine {
   }
 
   private async flush() {
-    if (!this.user || !this.latest || this.pushing) return;
+    if (!this.user || !this.vaultId || !this.latest || this.pushing) return;
     if (Date.now() < this.retryAt) {
       this.schedulePush(this.retryAt - Date.now());
       return;
     }
     const user = this.user;
+    const vaultId = this.vaultId;
     const plan = planPush(this.latest, this.index);
     if (plan.sets.length === 0 && plan.tombstones.length === 0 && plan.progress.length === 0) {
       if (plan.oversized.length > 0) {
@@ -287,12 +306,12 @@ class CloudEngine {
     try {
       const writes: Promise<void>[] = [];
       for (const set of plan.sets) {
-        writes.push(setDoc(doc(recallFirestore, 'recall_users', user.uid, 'sets', set.id), setToRemote(set)));
+        writes.push(setDoc(doc(recallFirestore, 'recall_users', vaultId, 'sets', set.id), setToRemote(set)));
       }
       for (const tomb of plan.tombstones) {
         writes.push(
           setDoc(
-            doc(recallFirestore, 'recall_users', user.uid, 'sets', tomb.id),
+            doc(recallFirestore, 'recall_users', vaultId, 'sets', tomb.id),
             tombstoneToRemote(tomb.id, tomb.deletedAt, tomb.createdAt),
           ),
         );
@@ -300,7 +319,7 @@ class CloudEngine {
       for (const p of plan.progress) {
         writes.push(
           setDoc(
-            doc(recallFirestore, 'recall_users', user.uid, 'progress', p.setId),
+            doc(recallFirestore, 'recall_users', vaultId, 'progress', p.setId),
             progressToRemote(p.setId, p.progress, p.updatedAt),
           ),
         );
@@ -345,6 +364,7 @@ class CloudEngine {
   async switchAccount(): Promise<void> {
     this.teardownListeners();
     this.user = null;
+    this.vaultId = null;
     this.latest = null;
     await firebaseSignOut(firebaseAuth).catch(() => undefined);
     await this.signIn();
@@ -356,6 +376,7 @@ class CloudEngine {
     this.writeFailures = 0;
     this.readFailures = 0;
     this.retryAt = 0;
+    this.vaultId = null;
     await firebaseSignOut(firebaseAuth).catch(() => undefined);
     this.setStatus({ state: 'off' });
   }

@@ -181,6 +181,31 @@ export function saveAccountData(
   }
 }
 
+/**
+ * Seed the new shared-vault browser cache without crossing legacy account
+ * boundaries. The currently authenticated UID may adopt its own old cache (or
+ * the original unscoped cache); a cache tied to some other UID is left alone.
+ * Once the vault cache exists it is authoritative and never replaced here.
+ */
+export function loadOrAdoptOwnerVaultData(
+  vaultId: string,
+  authenticatedLegacyUid: string,
+  activeAccountId: string | null,
+  activeData: AppData,
+  storage: StorageLike = defaultStorage(),
+): AppData {
+  if (hasAccountData(vaultId, storage)) return loadAccountData(vaultId, storage);
+
+  if (activeAccountId === authenticatedLegacyUid) {
+    saveAccountData(vaultId, activeData, storage);
+  } else if (hasAccountData(authenticatedLegacyUid, storage)) {
+    saveAccountData(vaultId, loadAccountData(authenticatedLegacyUid, storage), storage);
+  } else if (activeAccountId === null) {
+    saveAccountData(vaultId, activeData, storage);
+  }
+  return loadAccountData(vaultId, storage);
+}
+
 export function createSet(title: string, markdown: string, now: number): StudySet {
   const id = `${now.toString(36)}-${hashId(markdown).slice(0, 6)}`;
   return { id, title: title.trim() || 'Untitled set', markdown, createdAt: now, updatedAt: now };
