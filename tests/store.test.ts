@@ -10,6 +10,7 @@ import {
   loadData,
   masteryPercent,
   memoryStorage,
+  nextDataTimestamp,
   parseSetExport,
   recordAnswer,
   readActiveAccountId,
@@ -23,6 +24,18 @@ import {
 } from '../src/lib/store';
 
 describe('persistence round-trip', () => {
+  it('starts a fresh signed-out browser with an empty private workspace', () => {
+    const storage = memoryStorage();
+    expect(readActiveAccountId(storage)).toBeNull();
+    expect(loadData(storage)).toEqual({
+      version: 1,
+      sets: [],
+      progress: {},
+      tombstones: {},
+      theme: 'auto',
+    });
+  });
+
   it('saves and reloads sets and progress', () => {
     const storage = memoryStorage();
     let data = defaultData();
@@ -62,6 +75,29 @@ describe('persistence round-trip', () => {
     expect(loadAccountData('uid-one', storage).sets[0].title).toBe('First');
     expect(loadAccountData('uid-two', storage).sets[0].title).toBe('Second');
     expect(readActiveAccountId(storage)).toBe('uid-two');
+  });
+});
+
+describe('logical mutation clock', () => {
+  it('advances past a future set timestamp observed from another device', () => {
+    const data = upsertSet(defaultData(), {
+      ...createSet('Future', '# Future', 1),
+      createdAt: 50_000,
+      updatedAt: 80_000,
+    });
+    expect(nextDataTimestamp(data, 1_000)).toBe(80_001);
+  });
+
+  it('also remembers future deletions and progress while offline', () => {
+    const data = defaultData();
+    data.tombstones.deleted = 90_000;
+    data.progress.study = {
+      updatedAt: 110_000,
+      cards: {
+        card: { box: 1, seen: 1, correct: 0, wrong: 1, starred: false, last: 100_000 },
+      },
+    };
+    expect(nextDataTimestamp(data, 1_000)).toBe(110_001);
   });
 });
 

@@ -61,6 +61,8 @@ class CloudEngine {
   private relistenTimer: ReturnType<typeof setTimeout> | null = null;
   /** A sign-in failure survives the signed-out auth callback that follows it. */
   private authError: string | null = null;
+  /** Invalidates an async token/provider check when the auth session changes. */
+  private authRevision = 0;
 
   constructor(handlers: CloudHandlers) {
     this.handlers = handlers;
@@ -85,31 +87,50 @@ class CloudEngine {
     // callback below reports a plain signed-out session. Keep the reason.
     await getRedirectResult(firebaseAuth).catch((error) => this.failAuth(error));
     onAuthStateChanged(firebaseAuth, (user) => {
+      const revision = ++this.authRevision;
       this.teardownListeners();
+      this.user = null;
       if (!user) {
-        this.user = null;
         if (this.authError) this.setStatus({ state: 'error', error: this.authError });
         else this.setStatus({ state: 'off' });
         return;
       }
       this.authError = null;
-      const check = checkSyncAccount(user.email, user.emailVerified);
-      if (!check.ok) {
-        // Stay signed in so the address is visible, but never read, write, or
-        // push until the account has the claims required by the rules.
-        this.user = null;
-        this.setStatus({
-          state: 'error',
-          email: user.email ?? undefined,
-          error: check.message,
-          wrongAccount: true,
-        });
-        return;
-      }
-      this.latest = this.handlers.onAccount(user.uid);
-      this.user = user;
-      this.listen(user);
+      this.setStatus({ state: 'connecting', email: user.email ?? undefined });
+      void this.activateUser(user, revision);
     });
+  }
+
+  private async activateUser(user: User, revision: number) {
+    let signInProvider: string | null | undefined;
+    try {
+      signInProvider = (await user.getIdTokenResult()).signInProvider ?? null;
+    } catch {
+      // The rules require the current token's exact provider. If the claim
+      // cannot be inspected, fail closed instead of trusting linked identities.
+      signInProvider = undefined;
+    }
+    if (revision !== this.authRevision || firebaseAuth.currentUser !== user) return;
+    const check = checkSyncAccount(
+      user.email,
+      user.emailVerified,
+      signInProvider,
+    );
+    if (!check.ok) {
+      // Stay signed in so the address is visible, but never read, write, or
+      // push until the account has the claims required by the rules.
+      this.user = null;
+      this.setStatus({
+        state: 'error',
+        email: user.email ?? undefined,
+        error: check.message,
+        wrongAccount: true,
+      });
+      return;
+    }
+    this.latest = this.handlers.onAccount(user.uid);
+    this.user = user;
+    this.listen(user);
   }
 
   private teardownListeners() {

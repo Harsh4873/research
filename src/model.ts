@@ -135,6 +135,8 @@ export interface CardProgress {
 export interface SetProgress {
   cards: Record<string, CardProgress>;
   bestMatchMs?: number;
+  /** Logical timestamp for progress-level fields such as `bestMatchMs`. */
+  updatedAt?: number;
 }
 
 export type Theme = 'auto' | 'light' | 'dark';

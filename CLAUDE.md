@@ -22,6 +22,14 @@ In the same session:
 
 Do not force-push to `main`; leave unrelated dirty files out of the commit.
 
+## Current product boundary
+
+Research is a browser-only, local-first study workspace. It has no AI feature,
+serverless API, or backend service. Process imported PDFs and reference files on
+the device, and only use the existing private Firebase path when the user enables
+sync. Never add an API key or direct browser call to a paid/private AI service; a
+future backend requires an explicit product request and an authenticated design.
+
 ## No personal or sensitive information in the repo
 
 These repositories are deployed publicly. Never write the owner's real name,

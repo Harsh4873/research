@@ -89,6 +89,9 @@ function sanitize(raw: unknown): AppData {
       }
       const progress: SetProgress = { cards };
       if (typeof rp.bestMatchMs === 'number' && rp.bestMatchMs > 0) progress.bestMatchMs = rp.bestMatchMs;
+      if (typeof rp.updatedAt === 'number' && Number.isFinite(rp.updatedAt) && rp.updatedAt > 0) {
+        progress.updatedAt = rp.updatedAt;
+      }
       data.progress[setId] = progress;
     }
   }
@@ -181,6 +184,31 @@ export function saveAccountData(
 export function createSet(title: string, markdown: string, now: number): StudySet {
   const id = `${now.toString(36)}-${hashId(markdown).slice(0, 6)}`;
   return { id, title: title.trim() || 'Untitled set', markdown, createdAt: now, updatedAt: now };
+}
+
+/**
+ * A monotonic mutation stamp derived from every cloud-ordered value this local
+ * library has observed. Using Date.now() alone lets a device with a fast clock
+ * outrank every later edit from a correctly set device. Once that future stamp
+ * has synced here, local changes advance past it even while this device is
+ * offline, so last-write-wins can converge again.
+ */
+export function nextDataTimestamp(data: AppData, now = Date.now()): number {
+  let newest = Number.isFinite(now) ? Math.floor(now) : 0;
+  for (const set of data.sets) {
+    if (Number.isFinite(set.createdAt)) newest = Math.max(newest, Math.floor(set.createdAt));
+    if (Number.isFinite(set.updatedAt)) newest = Math.max(newest, Math.floor(set.updatedAt));
+  }
+  for (const deletedAt of Object.values(data.tombstones)) {
+    if (Number.isFinite(deletedAt)) newest = Math.max(newest, Math.floor(deletedAt));
+  }
+  for (const progress of Object.values(data.progress)) {
+    if (Number.isFinite(progress.updatedAt)) newest = Math.max(newest, Math.floor(progress.updatedAt ?? 0));
+    for (const card of Object.values(progress.cards)) {
+      if (Number.isFinite(card.last)) newest = Math.max(newest, Math.floor(card.last));
+    }
+  }
+  return newest + 1;
 }
 
 export function upsertSet(data: AppData, set: StudySet): AppData {

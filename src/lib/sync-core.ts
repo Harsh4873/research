@@ -37,7 +37,7 @@ export function emptyRemoteIndex(): RemoteIndex {
 }
 
 /** Why sync cannot use the signed-in account, or `null` when it can. */
-export type AccountProblem = 'missing-email' | 'unverified-email';
+export type AccountProblem = 'missing-email' | 'unverified-email' | 'non-google-provider';
 
 export interface AccountCheck {
   ok: boolean;
@@ -53,6 +53,7 @@ export interface AccountCheck {
 export function checkSyncAccount(
   email: string | null | undefined,
   emailVerified: boolean,
+  signInProvider: string | null | undefined,
 ): AccountCheck {
   const signedIn = (email ?? '').trim();
   if (!signedIn) {
@@ -69,16 +70,29 @@ export function checkSyncAccount(
       message: `Verify ${signedIn} with Google before syncing Research.`,
     };
   }
+  const googleSession = signInProvider === 'google.com';
+  if (!googleSession) {
+    return {
+      ok: false,
+      problem: 'non-google-provider',
+      message: 'Research syncs only sessions signed in with Google. Sign in again with the Google button.',
+    };
+  }
   return { ok: true };
 }
 
-/** The moment this progress was last touched, derived from its cards. */
+/** The moment this progress was last touched, including progress-level fields. */
 export function progressStamp(progress: SetProgress): number {
-  let stamp = 0;
+  let stamp = Number.isFinite(progress.updatedAt) ? Math.floor(progress.updatedAt ?? 0) : 0;
   for (const card of Object.values(progress.cards)) {
     if (card.last > stamp) stamp = card.last;
   }
   return stamp;
+}
+
+/** Stamp a progress-only mutation (for example a faster matching time). */
+export function recordBestMatch(progress: SetProgress, bestMatchMs: number, updatedAt: number): SetProgress {
+  return { ...progress, bestMatchMs, updatedAt };
 }
 
 const MAX_REMOTE_MARKDOWN = 600_000;
@@ -179,26 +193,37 @@ export function applyRemoteProgress(data: AppData, remote: RemoteProgress): { da
   }
   const local: SetProgress = data.progress[remote.setId] ?? { cards: {} };
   let changed = false;
+  let localMustRepublish = false;
   const cards = { ...local.cards };
+  const remoteCardIds = new Set<string>();
 
   for (const [cardId, rawCard] of Object.entries(remote.cards ?? {})) {
     const incoming = sanitizeRemoteCard(rawCard);
     if (!incoming) continue;
+    remoteCardIds.add(cardId);
     const existing = cards[cardId];
     if (!existing || incoming.last > existing.last) {
       cards[cardId] = incoming;
       if (!existing || JSON.stringify(existing) !== JSON.stringify(incoming)) changed = true;
+    } else if (JSON.stringify(existing) !== JSON.stringify(incoming)) {
+      localMustRepublish = true;
     }
   }
+  if (Object.keys(local.cards).some((cardId) => !remoteCardIds.has(cardId))) localMustRepublish = true;
 
   let bestMatchMs = local.bestMatchMs;
   if (typeof remote.bestMatchMs === 'number' && remote.bestMatchMs > 0 && (!bestMatchMs || remote.bestMatchMs < bestMatchMs)) {
     bestMatchMs = remote.bestMatchMs;
     changed = true;
+  } else if (bestMatchMs && bestMatchMs !== remote.bestMatchMs) {
+    localMustRepublish = true;
   }
 
+  let mergedStamp = Math.max(progressStamp(local), remote.updatedAt);
+  if (localMustRepublish && mergedStamp <= remote.updatedAt) mergedStamp = remote.updatedAt + 1;
+  if (remote.updatedAt > progressStamp(local) || mergedStamp > progressStamp(local)) changed = true;
   if (!changed) return { data, changed };
-  const merged: SetProgress = { cards };
+  const merged: SetProgress = { cards, updatedAt: mergedStamp };
   if (bestMatchMs) merged.bestMatchMs = bestMatchMs;
   return { data: { ...data, progress: { ...data.progress, [remote.setId]: merged } }, changed: true };
 }

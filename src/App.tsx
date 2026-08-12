@@ -14,6 +14,7 @@ import {
   hasAccountData,
   loadAccountData,
   loadData,
+  nextDataTimestamp,
   parseSetExport,
   readActiveAccountId,
   recordAnswer,
@@ -24,6 +25,7 @@ import {
   withProgress,
   writeActiveAccountId,
 } from './lib/store';
+import { recordBestMatch } from './lib/sync-core';
 import { SAMPLE_MARKDOWN, SAMPLE_TITLE } from './lib/sample';
 import { Library, type ImportItem } from './components/Library';
 import { SetShell } from './components/SetShell';
@@ -203,7 +205,7 @@ export default function App() {
         // Text copied from a web page carries HTML; store it as markdown.
         markdown = normalizeHtmlInMarkdown(markdown);
         const docTitle = parseMarkdown(markdown).title;
-        const set = createSet(title || docTitle || 'Untitled set', markdown, Date.now() + created.length);
+        const set = createSet(title || docTitle || 'Untitled set', markdown, nextDataTimestamp(next));
         next = upsertSet(next, set);
         created.push(set);
       } catch {
@@ -227,7 +229,7 @@ export default function App() {
 
   const removeSet = (set: StudySet) => {
     if (!window.confirm(`Remove “${set.title}” and its progress? This also removes it from synced devices.`)) return;
-    setData((d) => deleteSet(d, set.id, Date.now()));
+    setData((d) => deleteSet(d, set.id, nextDataTimestamp(d)));
     if (route.view === 'set' && route.setId === set.id) navigate(isPaperSet(set.id) ? '/review' : '/recall');
   };
 
@@ -296,9 +298,13 @@ export default function App() {
   };
 
   const savePaper = (draft: PaperDraft) => {
-    const set = createPaperSet(draft.meta.title, draft.markdown, Date.now());
-    setData((d) => upsertSet(d, set));
-    navigate(`/set/${set.id}/notes`);
+    const created = createPaperSet(
+      draft.meta.title,
+      draft.markdown,
+      nextDataTimestamp(dataRef.current),
+    );
+    setData((d) => upsertSet(d, created));
+    navigate(`/set/${created.id}/notes`);
   };
 
   /**
@@ -324,7 +330,10 @@ export default function App() {
         return 'The source only offered the abstract this time, so the saved copy was kept.';
       }
       if (result.markdown.trim() === set.markdown.trim()) return 'Already up to date — nothing changed.';
-      setData((d) => upsertSet(d, { ...set, markdown: result.markdown, updatedAt: Date.now() }));
+      setData((d) => {
+        const current = d.sets.find((candidate) => candidate.id === set.id) ?? set;
+        return upsertSet(d, { ...current, markdown: result.markdown, updatedAt: nextDataTimestamp(d) });
+      });
       if (wasAbstractOnly && result.fullText) return `Full text found. ${result.openAccessNote}`;
       return 'Re-fetched from the source.';
     } catch (error) {
@@ -334,13 +343,13 @@ export default function App() {
 
   const savePapers = (drafts: PaperDraft[]) => {
     if (drafts.length === 0) return;
-    const now = Date.now();
-    setData((d) =>
-      drafts.reduce(
-        (acc, draft, index) => upsertSet(acc, createPaperSet(draft.meta.title, draft.markdown, now + index)),
-        d,
+    setData((d) => drafts.reduce(
+      (acc, draft) => upsertSet(
+        acc,
+        createPaperSet(draft.meta.title, draft.markdown, nextDataTimestamp(acc)),
       ),
-    );
+      d,
+    ));
     setNotice(`Added ${drafts.length} papers to Review.`);
   };
 
@@ -355,25 +364,43 @@ export default function App() {
   };
 
   const answerFor = (setId: string) => (cardId: string, correct: boolean) => {
-    setData((d) => withProgress(d, setId, recordAnswer(getProgress(d, setId), cardId, correct, Date.now())));
+    setData((d) => withProgress(
+      d,
+      setId,
+      recordAnswer(getProgress(d, setId), cardId, correct, nextDataTimestamp(d)),
+    ));
   };
 
   const starFor = (setId: string) => (cardId: string) => {
-    setData((d) => withProgress(d, setId, toggleStar(getProgress(d, setId), cardId, Date.now())));
+    setData((d) => withProgress(
+      d,
+      setId,
+      toggleStar(getProgress(d, setId), cardId, nextDataTimestamp(d)),
+    ));
   };
 
   const bestTimeFor = (setId: string) => (ms: number) => {
-    setData((d) => withProgress(d, setId, { ...getProgress(d, setId), bestMatchMs: ms }));
+    setData((d) => withProgress(
+      d,
+      setId,
+      recordBestMatch(getProgress(d, setId), ms, nextDataTimestamp(d)),
+    ));
   };
 
   const saveMarkdown = (set: StudySet) => (markdown: string) => {
-    setData((d) => upsertSet(d, { ...set, markdown, updatedAt: Date.now() }));
+    setData((d) => {
+      const current = d.sets.find((candidate) => candidate.id === set.id) ?? set;
+      return upsertSet(d, { ...current, markdown, updatedAt: nextDataTimestamp(d) });
+    });
   };
 
   const appendNote = (set: StudySet) => (note: string) => {
     const heading = /(^|\n)## Added notes\s*(\n|$)/i.test(set.markdown) ? '' : '\n\n## Added notes';
     const markdown = `${set.markdown.trimEnd()}${heading}\n\n${note.trim()}\n`;
-    setData((d) => upsertSet(d, { ...set, markdown, updatedAt: Date.now() }));
+    setData((d) => {
+      const current = d.sets.find((candidate) => candidate.id === set.id) ?? set;
+      return upsertSet(d, { ...current, markdown, updatedAt: nextDataTimestamp(d) });
+    });
     setNotice('Note added. Your study material has been refreshed.');
   };
 

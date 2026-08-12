@@ -11,6 +11,7 @@ import {
   emptyRemoteIndex,
   planPush,
   progressStamp,
+  recordBestMatch,
   progressToRemote,
   setToRemote,
   statusAfterSnapshot,
@@ -118,6 +119,7 @@ describe('applyRemoteProgress', () => {
     expect(merged.cards.c2.box).toBe(3); // remote won
     expect(merged.cards.c3).toBeDefined();
     expect(merged.bestMatchMs).toBe(7000);
+    expect(merged.updatedAt).toBe(401); // local c1 must be repaired back to cloud
   });
 
   it('is a no-op when remote holds nothing newer', () => {
@@ -164,6 +166,13 @@ describe('planPush', () => {
     expect(plan.progress).toEqual([{ setId: 'new', progress, updatedAt: 600 }]);
   });
 
+  it('pushes a best-match improvement even when no card changed', () => {
+    const progress = { cards: {}, bestMatchMs: 4_000, updatedAt: 700 };
+    const data = dataWith([makeSet('match', 100)], { progress: { match: progress } });
+    const plan = planPush(data, indexFrom([remoteLive('match', 100)], { match: 600 }));
+    expect(plan.progress).toEqual([{ setId: 'match', progress, updatedAt: 700 }]);
+  });
+
   it('skips tombstones already deleted remotely and oversized sets', () => {
     const big = makeSet('big', 10, 'x'.repeat(600_001));
     const data = dataWith([big], { tombstones: { gone: 70 } });
@@ -180,6 +189,14 @@ describe('planPush', () => {
   });
 });
 
+describe('progress-level mutations', () => {
+  it('stamps a best-match result so it is eligible for sync with no cards', () => {
+    const progress = recordBestMatch({ cards: {} }, 4_000, 700);
+    expect(progress).toEqual({ cards: {}, bestMatchMs: 4_000, updatedAt: 700 });
+    expect(progressStamp(progress)).toBe(700);
+  });
+});
+
 describe('remote document builders', () => {
   it('round numbers and shape docs for Firestore rules', () => {
     const set = makeSet('a', 10.6);
@@ -192,12 +209,13 @@ describe('remote document builders', () => {
     expect('bestMatchMs' in progress).toBe(false);
   });
 
-  it('progressStamp is the max card touch time', () => {
+  it('progressStamp includes progress-level changes as well as card touches', () => {
     let p = recordAnswer({ cards: {} }, 'a', true, 100);
     p = recordAnswer(p, 'b', true, 300);
     p = recordAnswer(p, 'c', false, 200);
     expect(progressStamp(p)).toBe(300);
     expect(progressStamp({ cards: {} })).toBe(0);
+    expect(progressStamp({ cards: {}, bestMatchMs: 4000, updatedAt: 500 })).toBe(500);
   });
 });
 
@@ -334,20 +352,30 @@ describe('sign-in errors', () => {
 });
 
 describe('checkSyncAccount', () => {
-  it('accepts any verified account with an email address', () => {
-    expect(checkSyncAccount('owner@example.test', true).ok).toBe(true);
-    expect(checkSyncAccount(' someone@school.test ', true).ok).toBe(true);
+  it('accepts a verified account whose token says Google', () => {
+    expect(checkSyncAccount('owner@example.test', true, 'google.com').ok).toBe(true);
+    expect(checkSyncAccount(' someone@school.test ', true, 'google.com').ok).toBe(true);
   });
 
   it('rejects an unverified account and names its address', () => {
-    const check = checkSyncAccount('someone@school.test', false);
+    const check = checkSyncAccount('someone@school.test', false, 'google.com');
     expect(check.ok).toBe(false);
     expect(check.problem).toBe('unverified-email');
     expect(check.message).toContain('someone@school.test');
   });
 
   it('rejects an account with no email at all', () => {
-    expect(checkSyncAccount(null, true)).toMatchObject({ ok: false, problem: 'missing-email' });
-    expect(checkSyncAccount('   ', true).problem).toBe('missing-email');
+    expect(checkSyncAccount(null, true, 'google.com')).toMatchObject({ ok: false, problem: 'missing-email' });
+    expect(checkSyncAccount('   ', true, 'google.com').problem).toBe('missing-email');
+  });
+
+  it('rejects a non-Google token even when Google is linked to the account', () => {
+    expect(checkSyncAccount('owner@example.test', true, 'password'))
+      .toMatchObject({ ok: false, problem: 'non-google-provider' });
+  });
+
+  it('fails closed when the token provider cannot be inspected', () => {
+    expect(checkSyncAccount('owner@example.test', true, undefined).problem)
+      .toBe('non-google-provider');
   });
 });
