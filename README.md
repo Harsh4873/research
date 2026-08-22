@@ -69,4 +69,4 @@ npm run dev
    npm run deploy:rules             # firebase deploy --only firestore:rules --project pickledgerpro
    ```
 
-   The rules file is the complete ruleset for every private app in the project, so keep it byte-identical across Gym, Daymark, Slate, Fare, Notes, Research, Degree, Studies, and Radar — deploying from any of them replaces the project rules. Deploy only when this file itself has changed.
+   The rules file is the complete ruleset for every private app in the project, so keep it byte-identical across Daymark, Degree, Fare, Goals, Gym, Notes, Radar, Recipes, Research, and Slate — deploying from any of them replaces the project rules. Deploy only when this file itself has changed.
