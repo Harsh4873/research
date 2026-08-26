@@ -17,10 +17,11 @@ export interface EpmcRecord {
   abstractText?: string;
   isOpenAccess?: string;
   inEPMC?: string;
+  hasPDF?: string;
   hasSuppl?: string;
   keywordList?: { keyword?: string[] };
   journalInfo?: { journal?: { title?: string }; yearOfPublication?: number };
-  fullTextUrlList?: { fullTextUrl?: Array<{ url?: string; documentStyle?: string; site?: string }> };
+  fullTextUrlList?: { fullTextUrl?: Array<{ url?: string; documentStyle?: string; site?: string; availabilityCode?: string }> };
 }
 
 export class PaperLookupError extends Error {
@@ -96,6 +97,61 @@ export function hasArticleBody(xml: string): boolean {
   if (body === -1) return false;
   // An empty <body/> or one holding only whitespace is not full text.
   return /<body[\s>][\s\S]{200,}?<\/body>/.test(xml);
+}
+
+function toHttps(url: string): string {
+  return url.replace(/^http:\/\//i, 'https://');
+}
+
+/** Open/free PDF links Europe PMC already listed, plus the PMC renderer when we have an id. */
+export function openAccessPdfUrls(record: EpmcRecord, pmcid?: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw?: string) => {
+    if (!raw) return;
+    const url = toHttps(raw.trim());
+    if (!/^https:\/\//i.test(url)) return;
+    if (seen.has(url)) return;
+    seen.add(url);
+    out.push(url);
+  };
+  for (const item of record.fullTextUrlList?.fullTextUrl ?? []) {
+    const style = (item.documentStyle ?? '').toLowerCase();
+    const code = (item.availabilityCode ?? '').toUpperCase();
+    if (style !== 'pdf') continue;
+    if (code !== 'OA' && code !== 'F') continue;
+    add(item.url);
+  }
+  if (pmcid && (record.hasPDF === 'Y' || out.length > 0)) {
+    add(`https://europepmc.org/articles/${normalizePmcid(pmcid)}?pdf=render`);
+  }
+  return out;
+}
+
+function headBytes(buf: ArrayBuffer, n = 8): string {
+  return String.fromCharCode(...new Uint8Array(buf.slice(0, n)));
+}
+
+function looksLikePdf(buf: ArrayBuffer): boolean {
+  return headBytes(buf, 5).startsWith('%PDF');
+}
+
+/** Fetch a PDF only when the response is actually a PDF, not a Cloudflare HTML wall. */
+async function fetchPdfBuffer(url: string, signal?: AbortSignal): Promise<ArrayBuffer | null> {
+  try {
+    const response = await fetch(url, { signal, redirect: 'follow' });
+    if (!response.ok) return null;
+    const buf = await response.arrayBuffer();
+    return looksLikePdf(buf) ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
+function jatsIsFullText(converted: PaperConversion | null, xml: string): converted is PaperConversion {
+  if (!converted) return false;
+  // Letters and some articles ship a real <body> with no titled <sec>.
+  return converted.counts.sections > 0 || hasArticleBody(xml);
 }
 
 export interface FullTextSource {
@@ -192,7 +248,7 @@ export function abstractOnlyMarkdown(meta: PaperMeta, abstractText: string | und
         : 'No abstract is available for this record, so this set covers the metadata only.',
       meta.doi ? `Full article: https://doi.org/${meta.doi}` : '',
       meta.pmid ? `PubMed: https://pubmed.ncbi.nlm.nih.gov/${meta.pmid}/` : '',
-      'To study the whole paper, download the publisher PDF and drop it on the Review tab.',
+      'To study the whole paper, download the publisher PDF and drop it on Papers.',
     ]
       .filter(Boolean)
       .join(' '),
@@ -250,7 +306,7 @@ export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<Lo
         doi: meta.doi,
         sourceNote: `${archive} full text (JATS) · ${pmcid}`,
       });
-      if (converted && converted.counts.sections > 0) {
+      if (jatsIsFullText(converted, source.xml)) {
         // Prefer search metadata for fields the XML leaves blank.
         converted.meta = {
           ...converted.meta,
@@ -271,6 +327,42 @@ export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<Lo
     }
   }
 
+  const pdfUrls = openAccessPdfUrls(record, pmcid);
+  let pdfAttempted = false;
+  for (const url of pdfUrls) {
+    pdfAttempted = true;
+    const buf = await fetchPdfBuffer(url, signal);
+    if (!buf) continue;
+    try {
+      const { pdfToMarkdown } = await import('./pdf-import');
+      const converted = await pdfToMarkdown(buf, {
+        fallbackTitle: meta.title,
+        signal,
+        sourceNote: meta.pmid ? `Open access PDF · PMID ${meta.pmid}` : 'Open access PDF',
+      });
+      const substantial = converted.counts.sections > 0 || converted.markdown.length > 1500;
+      if (!substantial) continue;
+      converted.meta = {
+        ...converted.meta,
+        title: meta.title || converted.meta.title,
+        journal: converted.meta.journal ?? meta.journal,
+        year: converted.meta.year ?? meta.year,
+        doi: converted.meta.doi ?? meta.doi,
+        pmid: converted.meta.pmid ?? meta.pmid,
+        pmcid: converted.meta.pmcid ?? meta.pmcid,
+        authors: meta.authors.length > 0 ? meta.authors : converted.meta.authors,
+        keywords: converted.meta.keywords.length > 0 ? converted.meta.keywords : meta.keywords,
+      };
+      return {
+        ...converted,
+        fullText: true,
+        openAccessNote: 'Full text from the open-access publisher PDF.',
+      };
+    } catch {
+      /* try the next URL */
+    }
+  }
+
   let abstractText = record.abstractText;
   if (!abstractText && meta.pmid) abstractText = await ncbiAbstract(meta.pmid, signal).catch(() => undefined);
 
@@ -279,11 +371,14 @@ export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<Lo
     abstractText,
     meta.pmid ? `PubMed abstract · PMID ${meta.pmid}` : 'PubMed abstract',
   );
+  const note = pdfAttempted
+    ? 'The publisher lists an open-access PDF, but it is not readable from this app (browser wall). Only the abstract was imported. Open the DOI in a browser and drop the PDF on Papers for the full paper.'
+    : pmcid
+      ? 'Only the abstract is machine-readable for this article.'
+      : 'This article is not in PubMed Central, so only the abstract is available.';
   return {
     ...conversion,
     fullText: false,
-    openAccessNote: pmcid
-      ? 'Only the abstract is machine-readable for this article.'
-      : 'This article is not open access, so only the abstract is available.',
+    openAccessNote: note,
   };
 }

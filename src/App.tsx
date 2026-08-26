@@ -69,8 +69,8 @@ function parseHash(): Route {
     const mode = (MODES as readonly string[]).includes(parts[2]) ? (parts[2] as Mode) : 'notes';
     return { view: 'set', setId: parts[1], mode };
   }
-  if (parts[0] === 'recall') return { view: 'library' };
-  if (parts[0] === 'review') return { view: 'review' };
+  if (parts[0] === 'recall' || parts[0] === 'flashcards') return { view: 'library' };
+  if (parts[0] === 'review' || parts[0] === 'papers') return { view: 'review' };
   return { view: 'home' };
 }
 
@@ -210,7 +210,7 @@ export default function App() {
         next = upsertSet(next, set);
         created.push(set);
       } catch {
-        errors.push(item.title ? `“${item.title}” is not a valid Research export.` : 'That JSON is not a valid Research export.');
+        errors.push(item.title ? `“${item.title}” is not a valid export.` : 'That JSON is not a valid export.');
       }
     }
     setData(next);
@@ -231,7 +231,7 @@ export default function App() {
   const removeSet = (set: StudySet) => {
     if (!window.confirm(`Remove “${set.title}” and its progress? This also removes it from synced devices.`)) return;
     setData((d) => deleteSet(d, set.id, nextDataTimestamp(d)));
-    if (route.view === 'set' && route.setId === set.id) navigate(isPaperSet(set.id) ? '/review' : '/recall');
+    if (route.view === 'set' && route.setId === set.id) navigate(isPaperSet(set.id) ? '/papers' : '/flashcards');
   };
 
   /** Review: resolve a PMID / PMCID / DOI into study markdown. */
@@ -351,7 +351,7 @@ export default function App() {
       ),
       d,
     ));
-    setNotice(`Added ${drafts.length} papers to Review.`);
+    setNotice(`Added ${drafts.length} paper${drafts.length === 1 ? '' : 's'}.`);
   };
 
   const exportSet = (set: StudySet) => {
@@ -431,17 +431,17 @@ export default function App() {
           <nav className="header-nav" aria-label="Sections">
             <button
               type="button"
-              className={`header-tab ${route.view === 'library' ? 'header-tab-active' : ''}`}
-              onClick={() => navigate('/recall')}
+              className={`header-tab header-tab-study ${route.view === 'library' ? 'header-tab-active' : ''}`}
+              onClick={() => navigate('/flashcards')}
             >
-              Recall
+              Flashcards
             </button>
             <button
               type="button"
-              className={`header-tab ${route.view === 'review' ? 'header-tab-active' : ''}`}
-              onClick={() => navigate('/review')}
+              className={`header-tab header-tab-papers ${route.view === 'review' ? 'header-tab-active' : ''}`}
+              onClick={() => navigate('/papers')}
             >
-              Review
+              Papers
             </button>
           </nav>
           <div className="header-actions">
@@ -478,8 +478,8 @@ export default function App() {
             progress={getProgress(data, activeSet.id)}
             mode={route.mode}
             onNavigate={(mode) => navigate(`/set/${activeSet.id}/${mode}`)}
-            onBack={() => navigate(isPaperSet(activeSet.id) ? '/review' : '/recall')}
-            backLabel={isPaperSet(activeSet.id) ? 'Review' : 'Library'}
+            onBack={() => navigate(isPaperSet(activeSet.id) ? '/papers' : '/flashcards')}
+            backLabel={isPaperSet(activeSet.id) ? 'Papers' : 'Flashcards'}
             onAnswer={answerFor(activeSet.id)}
             onToggleStar={starFor(activeSet.id)}
             onBestTime={bestTimeFor(activeSet.id)}
@@ -514,13 +514,12 @@ export default function App() {
             onOpen={(set) => navigate(`/set/${set.id}/notes`)}
           />
         ) : (
-          <Landing data={data} onRecall={() => navigate('/recall')} onReview={() => navigate('/review')} />
+          <Landing data={data} onFlashcards={() => navigate('/flashcards')} onPapers={() => navigate('/papers')} />
         )}
       </main>
 
       <footer className="app-footer">
-        Study sets are generated locally from your markdown. Dictation uses your browser’s speech service; Research
-        never stores the audio. Turn on Sync only when you want sets and progress on all your devices.
+        Notes and papers stay on this device. Turn on Sync only if you want them on your other devices.
       </footer>
     </div>
   );

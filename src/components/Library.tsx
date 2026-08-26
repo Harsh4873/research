@@ -1,5 +1,5 @@
-import { useRef, useState, type DragEvent } from 'react';
-import { ClipboardPaste, Download, FilePlus2, Sparkles, Trash2, Upload } from 'lucide-react';
+import { useMemo, useRef, useState, type DragEvent } from 'react';
+import { ClipboardPaste, Download, FilePlus2, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import type { AppData, StudyMaterial, StudySet } from '../model';
 import { masteryPercent } from '../lib/store';
 
@@ -25,7 +25,27 @@ export function Library({ data, materialFor, onImport, onLoadSample, onDelete, o
   const [pasteTitle, setPasteTitle] = useState('');
   const [pasteBody, setPasteBody] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  const [filter, setFilter] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const visible = useMemo(() => {
+    const fold = (text: string) =>
+      text
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '');
+    const tokens = fold(filter)
+      .split(/[\s,;]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 1);
+    if (tokens.length === 0) return data.sets;
+    return data.sets.filter((set) => {
+      const title = fold(set.title);
+      const hay = `${title}\n${fold(set.markdown)}`;
+      const words = title.split(/[^a-z0-9]+/).filter((word) => word.length > 1);
+      return tokens.every((token) => hay.includes(token) || words.some((word) => word.startsWith(token)));
+    });
+  }, [data.sets, filter]);
 
   const submitPaste = () => {
     if (!pasteBody.trim()) return;
@@ -61,8 +81,7 @@ export function Library({ data, materialFor, onImport, onLoadSample, onDelete, o
         <section className="hero">
           <h1 className="hero-title">Paste your notes. Get a study kit.</h1>
           <p className="hero-sub">
-            Recall turns plain markdown notes into flashcards, quizzes, fill-in-the-blanks, a matching game, and a
-            clean reading view — all in your browser, nothing uploaded.
+            Paste notes. Get flashcards, a quiz, fill-in-the-blanks, and a matching game — all in your browser.
           </p>
         </section>
       )}
@@ -127,9 +146,39 @@ export function Library({ data, materialFor, onImport, onLoadSample, onDelete, o
 
       {data.sets.length > 0 && (
         <section className="sets-section" aria-label="Your study sets">
-          <h2 className="section-title">Your sets</h2>
+          <div className="library-head">
+            <h2 className="section-title">Your sets</h2>
+            {data.sets.length > 0 && (
+              <div className="review-search-field library-filter">
+                <Search size={16} aria-hidden />
+                <input
+                  className="input"
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value)}
+                  placeholder="Search title, notes…"
+                  aria-label="Search your sets"
+                  spellCheck={false}
+                />
+                {filter && (
+                  <button type="button" className="find-clear" onClick={() => setFilter('')} aria-label="Clear search">
+                    <X size={15} aria-hidden />
+                  </button>
+                )}
+              </div>
+            )}
+            {filter.trim() && (
+              <p className="find-count">
+                {visible.length} of {data.sets.length} {data.sets.length === 1 ? 'set' : 'sets'}
+              </p>
+            )}
+          </div>
+          {visible.length === 0 ? (
+            <div className="mode-empty">
+              <p>Nothing in your sets matches “{filter.trim()}”.</p>
+            </div>
+          ) : (
           <div className="sets-grid">
-            {data.sets.map((set) => {
+            {visible.map((set) => {
               const material = materialFor(set);
               const progress = data.progress[set.id] ?? { cards: {} };
               const ids = [...material.terms.map((t) => t.id), ...material.clozes.map((c) => c.id)];
@@ -162,6 +211,7 @@ export function Library({ data, materialFor, onImport, onLoadSample, onDelete, o
               );
             })}
           </div>
+          )}
         </section>
       )}
     </div>

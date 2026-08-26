@@ -1,26 +1,35 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchAnyFullTextXml, hasArticleBody, lookupPaper } from '../src/lib/europepmc';
+import { fetchAnyFullTextXml, hasArticleBody, lookupPaper, openAccessPdfUrls } from '../src/lib/europepmc';
 
 const BODY = `<article><front><article-meta>
   <article-id pub-id-type="pmcid">PMC900001</article-id>
   <title-group><article-title>An author manuscript</article-title></title-group>
 </article-meta></front><body><sec><title>Methods</title><p>${'We measured the thing carefully. '.repeat(12)}</p></sec></body></article>`;
 
+const LETTER = `<article><front><article-meta>
+  <article-id pub-id-type="pmcid">PMC13259578</article-id>
+  <title-group><article-title>A letter with no sections</article-title></title-group>
+</article-meta></front><body><p>${'The health system needs more than resilience. '.repeat(20)}</p></body></article>`;
+
 const STUB = `<article><front><article-meta>
   <title-group><article-title>A citation-only record</article-title></title-group>
 </article-meta></front></article>`;
 
-function routeFetch(routes: Record<string, { status?: number; body?: string }>) {
+function routeFetch(routes: Record<string, { status?: number; body?: string; contentType?: string }>) {
   vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
     const url = String(input);
     const key = Object.keys(routes).find((fragment) => url.includes(fragment));
     const hit = key ? routes[key] : { status: 404 };
     const status = hit.status ?? 200;
+    const body = hit.body ?? '';
+    const headers = new Headers({ 'Content-Type': hit.contentType ?? 'text/plain' });
     return {
       ok: status >= 200 && status < 300,
       status,
-      text: async () => hit.body ?? '',
-      json: async () => JSON.parse(hit.body ?? 'null'),
+      headers,
+      text: async () => body,
+      json: async () => JSON.parse(body || 'null'),
+      arrayBuffer: async () => new TextEncoder().encode(body).buffer,
     } as Response;
   });
 }
@@ -135,5 +144,69 @@ describe('lookupPaper reaches author manuscripts', () => {
     const result = await lookupPaper({ kind: 'doi', value: '10.1016/S1473-3099(09)70282-8' });
     expect(result.fullText).toBe(false);
     expect(result.markdown).toContain('A short abstract.');
+  });
+
+  it('keeps a body that has no titled sections instead of dropping to the abstract', async () => {
+    routeFetch({
+      '/search?': {
+        body: JSON.stringify({
+          resultList: {
+            result: [{ pmid: '42508976', pmcid: 'PMC13259578', title: 'A letter with no sections', abstractText: 'A short abstract.' }],
+          },
+        }),
+      },
+      'fullTextXML': { body: LETTER },
+    });
+    const result = await lookupPaper({ kind: 'pmid', value: '42508976' });
+    expect(result.fullText).toBe(true);
+    expect(result.markdown).toContain('The health system needs more than resilience.');
+  });
+});
+
+describe('open-access PDF fallback', () => {
+  const heisler = {
+    resultList: {
+      result: [
+        {
+          pmid: '8662850',
+          doi: '10.1074/jbc.271.24.14572',
+          title: 'Amino acid substitutions in RNA polymerase',
+          authorString: 'Heisler L, Feng G, Jin D, Gross C, Landick R',
+          journalTitle: 'Journal of Biological Chemistry',
+          pubYear: '1996',
+          abstractText: `${'Rho-dependent termination and RNA polymerase elongation are coupled. '.repeat(8)}`,
+          isOpenAccess: 'N',
+          inEPMC: 'N',
+          hasPDF: 'N',
+          fullTextUrlList: {
+            fullTextUrl: [
+              {
+                availabilityCode: 'OA',
+                documentStyle: 'pdf',
+                site: 'Unpaywall',
+                url: 'http://www.jbc.org/article/S002192581846838X/pdf',
+              },
+            ],
+          },
+        },
+      ],
+    },
+  };
+
+  it('upgrades http Unpaywall links and ignores subscription DOIs', () => {
+    const urls = openAccessPdfUrls(heisler.resultList.result[0], undefined);
+    expect(urls).toEqual(['https://www.jbc.org/article/S002192581846838X/pdf']);
+  });
+
+  it('does not treat a Cloudflare HTML wall as the full paper', async () => {
+    routeFetch({
+      '/search?': { body: JSON.stringify(heisler) },
+      'jbc.org': { body: '<!DOCTYPE html><html>Just a moment...</html>', contentType: 'text/html' },
+    });
+    const result = await lookupPaper({ kind: 'pmid', value: '8662850' });
+    expect(result.fullText).toBe(false);
+    expect(result.openAccessNote).toMatch(/browser wall/i);
+    expect(result.markdown).toContain('Rho-dependent termination');
+    expect(result.markdown).toMatch(/PubMed abstract/);
   });
 });

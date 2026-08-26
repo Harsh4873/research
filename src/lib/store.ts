@@ -315,8 +315,8 @@ export function exportSetJson(set: StudySet): string {
 
 export function parseSetExport(json: string): { title: string; markdown: string } {
   const raw: unknown = JSON.parse(json);
-  if (typeof raw !== 'object' || raw === null) throw new Error('Not a Recall set export.');
+  if (typeof raw !== 'object' || raw === null) throw new Error('Not a flashcard set export.');
   const r = raw as Record<string, unknown>;
-  if (r.format !== EXPORT_FORMAT || typeof r.markdown !== 'string') throw new Error('Not a Recall set export.');
+  if (r.format !== EXPORT_FORMAT || typeof r.markdown !== 'string') throw new Error('Not a flashcard set export.');
   return { title: typeof r.title === 'string' ? r.title : 'Imported set', markdown: r.markdown };
 }

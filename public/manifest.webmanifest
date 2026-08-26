@@ -1,15 +1,15 @@
 {
-  "name": "Research — Read papers, study notes",
+  "name": "Research — Flashcards and papers",
   "short_name": "Research",
-  "description": "Read research papers and study your own notes. Everything stays on your device.",
+  "description": "Flashcards from your notes, or papers you drop in. Everything stays on this device.",
   "id": "/research/",
   "start_url": "/research/",
   "scope": "/research/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
-  "background_color": "#0f1020",
-  "theme_color": "#0f1020",
+  "background_color": "#121410",
+  "theme_color": "#121410",
   "categories": ["education", "productivity"],
   "icons": [
     {
@@ -27,9 +27,15 @@
   ],
   "shortcuts": [
     {
-      "name": "Open library",
-      "short_name": "Library",
-      "url": "/research/#/",
+      "name": "Flashcards",
+      "short_name": "Flashcards",
+      "url": "/research/#/flashcards",
+      "icons": [{ "src": "/research/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Papers",
+      "short_name": "Papers",
+      "url": "/research/#/papers",
       "icons": [{ "src": "/research/icon-192.png", "sizes": "192x192" }]
     }
   ]

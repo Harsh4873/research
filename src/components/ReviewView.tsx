@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react
 import {
   AlertTriangle,
   ArrowRight,
+  BookOpen,
   BookOpenCheck,
   Check,
   Copy,
@@ -9,7 +10,6 @@ import {
   FileDown,
   Library,
   Loader2,
-  Microscope,
   Search,
   Sigma,
   Table2,
@@ -171,13 +171,9 @@ export function ReviewView(props: ReviewViewProps) {
     <div className="review fade-in">
       <section className="review-hero">
         <h1 className="review-title">
-          <Microscope size={26} aria-hidden /> Review
+          <BookOpen size={26} aria-hidden /> Papers
         </h1>
-        <p className="review-sub">
-          Paste a PMID, PMCID, or DOI — or drop a PDF. Review pulls the paper into clean markdown with its sections,
-          tables, equations, figure captions, and supplementary files, then hands it to the same study engine Recall
-          uses.
-        </p>
+        <p className="review-sub">PMID, DOI, or a PDF. Then study it with flashcards.</p>
       </section>
 
       <section className="review-import" aria-label="Import a paper">
@@ -350,7 +346,7 @@ export function ReviewView(props: ReviewViewProps) {
                   setQuery('');
                 }}
               >
-                Add {phase.outcome.drafts.length} paper{phase.outcome.drafts.length === 1 ? '' : 's'} to Review{' '}
+                Add {phase.outcome.drafts.length} paper{phase.outcome.drafts.length === 1 ? '' : 's'}{' '}
                 <ArrowRight size={16} aria-hidden />
               </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPhase({ kind: 'idle' })}>
@@ -431,7 +427,7 @@ export function ReviewView(props: ReviewViewProps) {
                 className="input"
                 value={filter}
                 onChange={(event) => setFilter(event.target.value)}
-                placeholder="Search your papers — title, author, journal, PMID, DOI, or any word in the text…"
+                placeholder="Title, author, journal, PMID…"
                 aria-label="Search your papers"
                 spellCheck={false}
               />
@@ -482,7 +478,7 @@ export function ReviewView(props: ReviewViewProps) {
                         <div className="match-fields">
                           {fields.map((field) => (
                             <span key={field} className="match-chip">
-                              matched {field}
+                              {field === 'id' ? 'ID' : field === 'text' ? 'in text' : field}
                             </span>
                           ))}
                         </div>

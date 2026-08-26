@@ -46,6 +46,18 @@ const LIBRARY: StudySet[] = [
     { title: 'Metformin as adjunct antituberculosis therapy', authors: 'Klein A', journal: 'Science', year: '2014', pmid: '25411472' },
     'Metformin reduced intracellular bacterial growth in this model system.',
   ),
+  paper(
+    'd',
+    {
+      title: 'Heparan sulfate proteoglycans',
+      authors: 'Heisler N',
+      journal: 'Journal of Biological Chemistry',
+      year: '1996',
+      pmid: '8662850',
+      doi: '10.1074/jbc.271.24.14572',
+    },
+    'Fibroblast growth factor binding in this JBC letter.',
+  ),
   // A note set must never appear in paper search results.
   { id: 'note-1', title: 'My revision notes', markdown: '# My notes\n\ntuberculosis revision\n', createdAt: 1, updatedAt: 1 },
 ];
@@ -53,7 +65,7 @@ const LIBRARY: StudySet[] = [
 describe('searchPapers', () => {
   it('returns every paper, and no note sets, when the query is empty', () => {
     const all = searchPapers(LIBRARY, '');
-    expect(all).toHaveLength(3);
+    expect(all).toHaveLength(4);
     expect(all.some((m) => m.set.id === 'note-1')).toBe(false);
   });
 
@@ -100,6 +112,16 @@ describe('searchPapers', () => {
     expect(searchPapers(LIBRARY, 'tuberculosis').length).toBeGreaterThan(1);
     expect(searchPapers(LIBRARY, 'tuberculosis metformin').map((m) => m.set.id)).toEqual(['paper-c']);
     expect(searchPapers(LIBRARY, 'tuberculosis unicorn')).toEqual([]);
+  });
+
+  it('finds a paper by labelled PMID or a journal abbreviation', () => {
+    expect(searchPapers(LIBRARY, 'pmid:39177079')[0].set.id).toBe('paper-a');
+    expect(searchPapers(LIBRARY, 'pmid 39177079')[0].set.id).toBe('paper-a');
+    expect(searchPapers(LIBRARY, 'jbc')[0].set.id).toBe('paper-d');
+  });
+
+  it('matches a title by word prefix, not only a full word', () => {
+    expect(searchPapers(LIBRARY, 'diabet').map((m) => m.set.id)).toEqual(['paper-a']);
   });
 
   it('is case and punctuation tolerant', () => {

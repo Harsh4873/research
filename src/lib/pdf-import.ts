@@ -65,6 +65,8 @@ export interface PdfImportOptions {
   signal?: AbortSignal;
   /** Title fallback when the document has no usable metadata. */
   fallbackTitle?: string;
+  /** Provenance line written into YAML front matter. */
+  sourceNote?: string;
 }
 
 const DOI_IN_TEXT = /\b(10\.\d{4,9}\/[^\s"'<>,;]+)/;
@@ -194,7 +196,9 @@ export async function pdfToMarkdown(file: File | ArrayBuffer, options: PdfImport
 
     const built = buildMarkdown(lines);
     const header = [
-      buildFrontMatter(meta, { source: `PDF import · ${doc.numPages} page${doc.numPages === 1 ? '' : 's'}` }),
+      buildFrontMatter(meta, {
+        source: options.sourceNote ?? `PDF import · ${doc.numPages} page${doc.numPages === 1 ? '' : 's'}`,
+      }),
       `# ${meta.title}`,
       citationLine(meta),
     ];
