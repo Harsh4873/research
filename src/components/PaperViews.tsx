@@ -12,6 +12,10 @@ import {
   Search,
   Sigma,
   Table2,
+  Target,
+  FlaskConical,
+  CircleCheck,
+  AlertTriangle,
   X,
 } from 'lucide-react';
 import type { ParsedDoc, TableBlock } from '../model';
@@ -20,8 +24,12 @@ import {
   collectNumbers,
   searchPaper,
   type ClaimItem,
+  type PaperBrief,
+  type PaperViews,
   type SearchHit,
+  type SkimSection,
 } from '../lib/paper-view';
+import { briefIsEmpty } from '../lib/paper-skim';
 import { copyText } from '../lib/clipboard';
 import { PaperImage } from './Inline';
 
@@ -439,11 +447,101 @@ export function FindView({ doc, setId }: { doc: ParsedDoc; setId: string }) {
  * Skim — read the paper fast
  * ------------------------------------------------------------------ */
 
-export function SkimView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string; setId: string }) {
-  const views = useMemo(() => buildPaperViews(doc, pmcid), [doc, pmcid]);
-  const sections = views.skim.filter((section) => section.gist || section.numbers.length > 0);
+const ROLE_LABEL: Record<SkimSection['role'], string> = {
+  abstract: 'Abstract',
+  intro: 'Intro',
+  methods: 'Methods',
+  results: 'Results',
+  discussion: 'Discussion',
+  conclusion: 'Conclusion',
+  other: '',
+  apparatus: '',
+};
 
-  if (sections.length === 0) {
+function briefText(brief: PaperBrief): string {
+  return [
+    brief.verdict,
+    brief.asked && `Asked: ${brief.asked}`,
+    brief.did && `Did: ${brief.did}`,
+    brief.found && `Found: ${brief.found}`,
+    brief.caveat && `Watch for: ${brief.caveat}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function SkimSectionCard({
+  section,
+  onOpen,
+}: {
+  section: SkimSection;
+  onOpen?: (id: string) => void;
+}) {
+  const role = ROLE_LABEL[section.role];
+  const inner = (
+    <>
+      <div className="skim-head">
+        <span className="skim-title" data-depth={section.depth}>
+          {section.title}
+        </span>
+        <span className="skim-head-meta">
+          {role && <span className={`skim-role skim-role-${section.role}`}>{role}</span>}
+          <span className="skim-words">{section.words} words</span>
+        </span>
+      </div>
+      {section.gist && <p className="skim-gist">{section.gist}</p>}
+      {section.bullets.length > 0 && (
+        <ul className="skim-bullets">
+          {section.bullets.map((bullet, i) => (
+            <li key={i}>{bullet}</li>
+          ))}
+        </ul>
+      )}
+      {section.numbers.length > 0 && (
+        <div className="skim-numbers">
+          {section.numbers.map((value, j) => (
+            <span key={j} className="number-chip">
+              {value}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  if (!onOpen) {
+    return (
+      <div className="skim-card" id={`skim-${section.id}`}>
+        {inner}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="skim-card"
+      id={`skim-${section.id}`}
+      onClick={() => onOpen(section.id)}
+    >
+      {inner}
+    </button>
+  );
+}
+
+/** Shared skim report: import preview and the Skim tab. */
+export function SkimReport({
+  views,
+  onOpenSection,
+}: {
+  views: PaperViews;
+  onOpenSection?: (headingId: string) => void;
+}) {
+  const sections = views.skim.filter((section) => section.gist || section.numbers.length > 0);
+  const { brief } = views;
+  const topClaims = views.claims.filter((claim) => claim.kind === 'finding' || claim.kind === 'conclusion').slice(0, 4);
+
+  if (sections.length === 0 && briefIsEmpty(brief)) {
     return (
       <div className="mode-empty">
         <p>This paper is too short to skim — read it on the Notes tab.</p>
@@ -451,15 +549,57 @@ export function SkimView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string
     );
   }
 
-  const topClaims = views.claims.slice(0, 5);
-
   return (
-    <div className="paper-pane fade-in">
+    <div className="skim-report">
+      {!briefIsEmpty(brief) && (
+        <section className="pane-section skim-brief">
+          <div className="skim-brief-head">
+            <h2 className="pane-title">
+              <Quote size={18} aria-hidden /> The paper in one pass
+            </h2>
+            <CopyButton label="Copy brief" text={briefText(brief)} />
+          </div>
+          {brief.verdict && <p className="skim-verdict">{brief.verdict}</p>}
+          <div className="skim-slots">
+            {brief.asked && (
+              <div className="skim-slot">
+                <div className="skim-slot-label">
+                  <Target size={14} aria-hidden /> Asked
+                </div>
+                <p>{brief.asked}</p>
+              </div>
+            )}
+            {brief.did && (
+              <div className="skim-slot">
+                <div className="skim-slot-label">
+                  <FlaskConical size={14} aria-hidden /> Did
+                </div>
+                <p>{brief.did}</p>
+              </div>
+            )}
+            {brief.found && (
+              <div className="skim-slot">
+                <div className="skim-slot-label">
+                  <CircleCheck size={14} aria-hidden /> Found
+                </div>
+                <p>{brief.found}</p>
+              </div>
+            )}
+            {brief.caveat && (
+              <div className="skim-slot">
+                <div className="skim-slot-label">
+                  <AlertTriangle size={14} aria-hidden /> Watch for
+                </div>
+                <p>{brief.caveat}</p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {topClaims.length > 0 && (
         <section className="pane-section">
-          <h2 className="pane-title">
-            <Quote size={18} aria-hidden /> The short version
-          </h2>
+          <h2 className="pane-title">Headline claims</h2>
           <ul className="skim-claims">
             {topClaims.map((claim, i) => (
               <li key={i}>{claim.text}</li>
@@ -468,31 +608,53 @@ export function SkimView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string
         </section>
       )}
 
-      <section className="pane-section">
-        <h2 className="pane-title">Section by section</h2>
-        <div className="skim-list">
-          {sections.map((section, i) => (
-            <button key={i} type="button" className="skim-card" onClick={() => jumpToNotes(setId, section.id)}>
-              <div className="skim-head">
-                <span className="skim-title" data-depth={section.depth}>
+      {sections.length > 0 && (
+        <section className="pane-section">
+          <h2 className="pane-title">Section by section</h2>
+          {sections.length > 3 && (
+            <nav className="skim-toc" aria-label="Sections">
+              {sections.map((section) => (
+                <a key={section.id || section.title} href={`#skim-${section.id}`}>
                   {section.title}
-                </span>
-                <span className="skim-words">{section.words} words</span>
-              </div>
-              {section.gist && <p className="skim-gist">{section.gist}</p>}
-              {section.numbers.length > 0 && (
-                <div className="skim-numbers">
-                  {section.numbers.map((value, j) => (
-                    <span key={j} className="number-chip">
-                      {value}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-      </section>
+                </a>
+              ))}
+            </nav>
+          )}
+          <div className="skim-list">
+            {sections.map((section, i) => (
+              <SkimSectionCard
+                key={section.id || `${section.title}-${i}`}
+                section={section}
+                onOpen={onOpenSection}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+export function LiveSkimList({ sections }: { sections: SkimSection[] }) {
+  const visible = sections.filter((section) => section.gist || section.numbers.length > 0);
+  if (visible.length === 0) return null;
+  return (
+    <ol className="skim-live">
+      {visible.map((section, i) => (
+        <li key={section.id || `${section.title}-${i}`}>
+          <strong>{section.title}</strong>
+          {section.gist && <p>{section.gist}</p>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+export function SkimView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string; setId: string }) {
+  const views = useMemo(() => buildPaperViews(doc, pmcid), [doc, pmcid]);
+  return (
+    <div className="paper-pane fade-in">
+      <SkimReport views={views} onOpenSection={(headingId) => jumpToNotes(setId, headingId)} />
     </div>
   );
 }

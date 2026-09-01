@@ -19,7 +19,7 @@ const MAX_SECTION_CARDS = 24;
 const SEPARATOR_RE = /^\s*(?:[:：]|[—–―]|::|[-=]{1,2})\s*/;
 const DEFINITION_CONNECTOR_RE = /^\s*(?:is|are|means?|refers? to|describes?|represents?|equals?|=)\s+/i;
 const IMPLICIT_DEFINITION_RE = /^\s*(?:an?\s+|the\s+|how\s+|whether\s+|probability\b|ratio\b)/i;
-function bareHeading(section: string): string {
+export function bareHeading(section: string): string {
   return section.replace(/^\d+(?:\.\d+)*[.)]?\s*/, '').trim();
 }
 

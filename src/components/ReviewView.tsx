@@ -25,6 +25,10 @@ import { parsePaperIds } from '../lib/paper-id';
 import { isReferenceFile } from '../lib/reference-file';
 import { copyText } from '../lib/clipboard';
 import type { PaperConversion } from '../lib/jats';
+import { parseMarkdown } from '../lib/markdown';
+import { buildPaperViews } from '../lib/paper-view';
+import type { SkimSection } from '../lib/paper-skim';
+import { LiveSkimList, SkimReport } from './PaperViews';
 
 export interface PaperDraft extends PaperConversion {
   fullText: boolean;
@@ -36,12 +40,14 @@ export interface BulkOutcome {
   failures: Array<{ label: string; message: string }>;
 }
 
+export type ImportStatus = (status: string, extras?: { sections?: SkimSection[] }) => void;
+
 interface ReviewViewProps {
   data: AppData;
   materialFor: (set: StudySet) => StudyMaterial;
-  onLookup: (query: string, onStatus: (status: string) => void) => Promise<PaperDraft>;
-  onLookupMany: (text: string, onStatus: (status: string) => void) => Promise<BulkOutcome>;
-  onImportPdf: (file: File, onStatus: (status: string) => void) => Promise<PaperDraft>;
+  onLookup: (query: string, onStatus: ImportStatus) => Promise<PaperDraft>;
+  onLookupMany: (text: string, onStatus: ImportStatus) => Promise<BulkOutcome>;
+  onImportPdf: (file: File, onStatus: ImportStatus) => Promise<PaperDraft>;
   onReadReferenceFile: (file: File) => Promise<string>;
   onSave: (draft: PaperDraft) => void;
   onSaveMany: (drafts: PaperDraft[]) => void;
@@ -52,7 +58,7 @@ interface ReviewViewProps {
 
 type Phase =
   | { kind: 'idle' }
-  | { kind: 'working'; status: string }
+  | { kind: 'working'; status: string; sections?: SkimSection[] }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; draft: PaperDraft }
   | { kind: 'bulk'; outcome: BulkOutcome }
@@ -78,11 +84,13 @@ export function ReviewView(props: ReviewViewProps) {
   const pendingCount = query.trim() ? parsePaperIds(query).length : 0;
   const matches = useMemo(() => searchPapers(data.sets, filter), [data.sets, filter]);
 
-  const run = async (task: (onStatus: (status: string) => void) => Promise<Phase>) => {
+  const run = async (task: (onStatus: ImportStatus) => Promise<Phase>) => {
     setPhase({ kind: 'working', status: 'Starting…' });
     setCopied(false);
     try {
-      setPhase(await task((status) => setPhase({ kind: 'working', status })));
+      setPhase(
+        await task((status, extras) => setPhase({ kind: 'working', status, sections: extras?.sections })),
+      );
     } catch (error) {
       const err = error as { message?: string; hint?: string };
       setPhase({
@@ -155,6 +163,10 @@ export function ReviewView(props: ReviewViewProps) {
   };
 
   const draft = phase.kind === 'ready' ? phase.draft : null;
+  const draftViews = useMemo(
+    () => (draft ? buildPaperViews(parseMarkdown(draft.markdown), draft.meta.pmcid) : null),
+    [draft],
+  );
 
   const downloadMarkdown = () => {
     if (!draft) return;
@@ -173,7 +185,7 @@ export function ReviewView(props: ReviewViewProps) {
         <h1 className="review-title">
           <BookOpen size={26} aria-hidden /> Papers
         </h1>
-        <p className="review-sub">PMID, DOI, or a PDF. Then study it with flashcards.</p>
+        <p className="review-sub">PMID, DOI, or a PDF. Skim it by section as soon as the headings land.</p>
       </section>
 
       <section className="review-import" aria-label="Import a paper">
@@ -255,8 +267,11 @@ export function ReviewView(props: ReviewViewProps) {
         </div>
 
         {phase.kind === 'working' && (
-          <div className="review-status fade-in" role="status">
-            <Loader2 size={16} aria-hidden className="spin" /> {phase.status}
+          <div className="review-working fade-in">
+            <div className="review-status" role="status">
+              <Loader2 size={16} aria-hidden className="spin" /> {phase.status}
+            </div>
+            {phase.sections && phase.sections.length > 0 && <LiveSkimList sections={phase.sections} />}
           </div>
         )}
 
@@ -387,6 +402,12 @@ export function ReviewView(props: ReviewViewProps) {
               {draft.counts.references > 0 && <span className="meta-chip">{draft.counts.references} references</span>}
             </div>
 
+            {draftViews && (draftViews.skim.length > 0 || draftViews.brief.verdict) ? (
+              <div className="review-skim-preview">
+                <SkimReport views={draftViews} />
+              </div>
+            ) : null}
+
             <details className="review-preview">
               <summary>Preview the markdown</summary>
               <pre>{draft.markdown.slice(0, 4000)}{draft.markdown.length > 4000 ? '\n…' : ''}</pre>
@@ -394,7 +415,7 @@ export function ReviewView(props: ReviewViewProps) {
 
             <div className="review-result-actions">
               <button type="button" className="btn btn-primary" onClick={() => props.onSave(draft)}>
-                Study this paper <ArrowRight size={16} aria-hidden />
+                Open skim <ArrowRight size={16} aria-hidden />
               </button>
               <button
                 type="button"

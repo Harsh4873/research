@@ -55,11 +55,11 @@ const STUDY_TABS: { mode: Mode; label: string; icon: typeof BookOpen }[] = [
 ];
 
 const PAPER_TABS: { mode: Mode; label: string; icon: typeof BookOpen }[] = [
+  { mode: 'skim', label: 'Skim', icon: Zap },
   { mode: 'notes', label: 'Notes', icon: BookOpen },
   { mode: 'data', label: 'Data', icon: Table2 },
   { mode: 'claims', label: 'Claims', icon: Quote },
   { mode: 'find', label: 'Find', icon: Search },
-  { mode: 'skim', label: 'Skim', icon: Zap },
 ];
 
 export function SetShell(props: SetShellProps) {

@@ -205,11 +205,23 @@ describe('skim', () => {
     expect(methods.gist).toContain('enrolled 240 participants');
     expect(methods.numbers.length).toBeGreaterThan(0);
     expect(methods.words).toBeGreaterThan(5);
+    expect(methods.role).toBe('methods');
   });
 
   it('keeps sections in document order', () => {
     const titles = views.skim.map((s) => s.title);
     expect(titles.indexOf('Methods')).toBeLessThan(titles.indexOf('Results'));
     expect(titles.indexOf('Results')).toBeLessThan(titles.indexOf('Discussion'));
+  });
+
+  it('skips the title and the reference list', () => {
+    expect(views.skim.some((s) => s.title === 'A study of things')).toBe(false);
+    expect(views.skim.some((s) => s.title === 'References')).toBe(false);
+  });
+
+  it('fills a brief from the paper rather than the first sentence of each section', () => {
+    expect(views.brief.did).toMatch(/enrolled 240/i);
+    expect(views.brief.found).toMatch(/survival/i);
+    expect(views.brief.verdict.length).toBeGreaterThan(20);
   });
 });

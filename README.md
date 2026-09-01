@@ -3,7 +3,7 @@
 Research is the owner's personal reading and study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. It has two halves:
 
 - **Recall** — paste or upload Markdown notes and turn them into study material: flashcards, quizzes, fill-in-the-blanks, and a matching game.
-- **Review** — give it a PMID, PMCID, DOI, or a PDF and read the paper fast: notes, data, claims, find, and skim.
+- **Review** — give it a PMID, PMCID, DOI, or a PDF and read the paper fast: skim, notes, data, claims, and find.
 
 Both share the same clean reading view with read-aloud, and turning on Sync keeps everything on every signed-in device (phone and laptop).
 
@@ -25,7 +25,7 @@ Both share the same clean reading view with read-aloud, and turning on Sync keep
   - **Data** — every supplementary file (linked straight to its download), table, figure (artwork and caption, or a link when it cannot be shown), equation, and data-availability statement in one place.
   - **Claims** — the sentences where the authors say what they found, filtered by findings / conclusions / quantified results.
   - **Find** — instant search across the paper, plus a Numbers mode listing every effect size, p-value, percentage, and count with its sentence.
-  - **Skim** — the headline claims, then a section-by-section gist with each section's key numbers.
+  - **Skim** — the paper in one pass (what was asked, what they did, what they found, what to watch for), then a section-by-section gist that prefers findings and numbers over the first sentence. Dropped PDFs stream these cards as headings appear.
 - Papers still sync and export like any other set; Recall keeps the flashcards, quiz, blanks, and match.
 
 All lookups use free, key-less public APIs (Europe PMC and NCBI E-utilities) straight from the browser; there is no backend.

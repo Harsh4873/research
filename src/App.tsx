@@ -31,7 +31,7 @@ import { Library, type ImportItem } from './components/Library';
 import { SetShell } from './components/SetShell';
 import { SyncMenu } from './components/SyncMenu';
 import { Landing } from './components/Landing';
-import { ReviewView, type BulkOutcome, type PaperDraft } from './components/ReviewView';
+import { ReviewView, type BulkOutcome, type ImportStatus, type PaperDraft } from './components/ReviewView';
 import { createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
 import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
 
@@ -66,7 +66,11 @@ type Route =
 function parseHash(): Route {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'set' && parts[1]) {
-    const mode = (MODES as readonly string[]).includes(parts[2]) ? (parts[2] as Mode) : 'notes';
+    const mode = (MODES as readonly string[]).includes(parts[2])
+      ? (parts[2] as Mode)
+      : isPaperSet(parts[1])
+        ? 'skim'
+        : 'notes';
     return { view: 'set', setId: parts[1], mode };
   }
   if (parts[0] === 'recall' || parts[0] === 'flashcards') return { view: 'library' };
@@ -235,7 +239,7 @@ export default function App() {
   };
 
   /** Review: resolve a PMID / PMCID / DOI into study markdown. */
-  const lookupPaper = async (query: string, onStatus: (status: string) => void): Promise<PaperDraft> => {
+  const lookupPaper = async (query: string, onStatus: ImportStatus): Promise<PaperDraft> => {
     const id = parsePaperId(query);
     if (!id) throw new Error('That does not look like a PMID, PMCID, or DOI.');
     onStatus(`Looking up ${describePaperId(id)}…`);
@@ -246,14 +250,15 @@ export default function App() {
   };
 
   /** Review: read a PDF entirely on this device. */
-  const importPdf = async (file: File, onStatus: (status: string) => void): Promise<PaperDraft> => {
+  const importPdf = async (file: File, onStatus: ImportStatus): Promise<PaperDraft> => {
     onStatus('Opening the PDF…');
     const { pdfToMarkdown } = await import('./lib/pdf-import');
     const conversion = await pdfToMarkdown(file, {
       fallbackTitle: file.name,
-      onProgress: ({ page, pages }) => onStatus(`Reading page ${page} of ${pages}…`),
+      onProgress: ({ page, pages, sections }) =>
+        onStatus(`Reading page ${page} of ${pages}…`, { sections }),
     });
-    onStatus('Building study material…');
+    onStatus('Building the skim…');
     return {
       ...conversion,
       fullText: true,
@@ -262,7 +267,7 @@ export default function App() {
   };
 
   /** Review: resolve a whole reference list, one paper at a time. */
-  const lookupPapers = async (text: string, onStatus: (status: string) => void): Promise<BulkOutcome> => {
+  const lookupPapers = async (text: string, onStatus: ImportStatus): Promise<BulkOutcome> => {
     const found = parsePaperIds(text);
     const ids = found.slice(0, MAX_BULK_LOOKUPS);
     const { lookupPaper: lookup } = await import('./lib/europepmc');
@@ -305,7 +310,7 @@ export default function App() {
       nextDataTimestamp(dataRef.current),
     );
     setData((d) => upsertSet(d, created));
-    navigate(`/set/${created.id}/notes`);
+    navigate(`/set/${created.id}/skim`);
   };
 
   /**
@@ -499,7 +504,7 @@ export default function App() {
             onReadReferenceFile={readReferenceFile}
             onSave={savePaper}
             onSaveMany={savePapers}
-            onOpen={(set) => navigate(`/set/${set.id}/notes`)}
+            onOpen={(set) => navigate(`/set/${set.id}/skim`)}
             onDelete={removeSet}
             onExport={exportSet}
           />

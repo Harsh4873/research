@@ -1,4 +1,18 @@
 import type { Block, ListBlock, ParsedDoc, TableBlock } from '../model';
+import { isNonStudySection } from './extract';
+import {
+  NUMBER_RE,
+  buildPaperBrief,
+  findNumbers,
+  splitSentences,
+  summarizeSection,
+  type PaperBrief,
+  type SkimSection,
+} from './paper-skim';
+import { skipFromSkim } from './section-split';
+
+export { NUMBER_RE, findNumbers, splitSentences, summarizeSection, buildPaperBrief };
+export type { PaperBrief, SkimSection };
 
 /**
  * Derives the reading views for a paper — data, claims, search, and skim —
@@ -55,15 +69,6 @@ export interface ClaimItem {
   trigger: string;
 }
 
-export interface SkimSection {
-  id: string;
-  title: string;
-  depth: number;
-  gist: string;
-  numbers: string[];
-  words: number;
-}
-
 export interface PaperViews {
   figures: FigureItem[];
   tables: TableItem[];
@@ -72,32 +77,12 @@ export interface PaperViews {
   availability: AvailabilityItem[];
   claims: ClaimItem[];
   skim: SkimSection[];
+  brief: PaperBrief;
 }
 
 const FLOAT_LABEL_RE = /^(table|figure|fig\.?|scheme|box|equation|algorithm)\s*([0-9IVXivx]+[a-z]?)?\s*[.:—–-]?\s*(.*)$/i;
 const AVAILABILITY_RE = /(data|code|software|materials?)\s+availability|availability of (data|code)|accession (codes?|numbers?)/i;
 const SUPPLEMENT_SECTION_RE = /^(supplementary|supporting)\s+(material|information|data|files?)$/i;
-
-/**
- * Numbers a reader actually looks for: p-values, effect sizes, percentages,
- * counts with units, ratios, and large or decimal figures. Bare one- and
- * two-digit numbers are skipped — in a paper they are almost always noise.
- */
-export const NUMBER_RE = new RegExp(
-  [
-    String.raw`\b[pP]\s*[<>=≤≥]\s*0?\.\d+`,
-    String.raw`\b(?:aOR|aHR|OR|HR|RR|CI)\s*[=:]?\s*\d+(?:\.\d+)?`,
-    String.raw`\b\d+(?:[.,]\d+)?\s*(?:%|‰)`,
-    String.raw`\b\d+(?:\.\d+)?\s*(?:-fold|fold|×)\b`,
-    String.raw`\b[nN]\s*=\s*\d[\d,]*`,
-    String.raw`\b\d+\/\d+\b`,
-    String.raw`\b\d+(?:\.\d+)?\s*(?:mg|kg|µg|μg|ml|mL|µl|μl|nm|mm|cm|km|bp|kb|Mb|Gb|°C|hours?|hr|min|days?|weeks?|months?|years?)\b`,
-    String.raw`\b\d{1,3}(?:[  ,]\d{3})+\b`,
-    String.raw`\b\d+\.\d+\b`,
-    String.raw`\b\d{3,}\b`,
-  ].join('|'),
-  'g',
-);
 
 const CLAIM_PATTERNS: Array<{ re: RegExp; kind: ClaimKind; score: number }> = [
   { re: /\bwe (?:found|discovered|observed|identified|detected)\b/i, kind: 'finding', score: 10 },
@@ -114,14 +99,6 @@ const CLAIM_PATTERNS: Array<{ re: RegExp; kind: ClaimKind; score: number }> = [
 ];
 
 const HEDGE_RE = /\b(?:may|might|could|would|remains? unclear|further (?:work|study|research)|future (?:work|studies))\b/i;
-
-function splitSentences(text: string): string[] {
-  return text
-    .replace(/\s+/g, ' ')
-    .split(/(?<=[.!?])\s+(?=["'“(]?[A-Z0-9])/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
 
 function parseFloatLabel(heading: string): { kind: string; label: string; caption: string } | null {
   const match = heading.trim().match(FLOAT_LABEL_RE);
@@ -188,29 +165,6 @@ export function scoreClaim(sentence: string, section: string): ClaimItem | null 
   return { text, section, kind: best.kind, score, trigger: best.trigger };
 }
 
-/** Identifiers are full of digits that are not measurements. */
-function stripIdentifiers(text: string): string {
-  return text
-    .replace(/\b10\.\d{4,9}\/\S+/g, ' ')
-    .replace(/\b(?:PMID|PMCID|PMC|DOI|ISBN|ISSN|accession(?: number)?)\s*:?\s*\S+/gi, ' ')
-    .replace(/https?:\/\/\S+/g, ' ');
-}
-
-export function findNumbers(text: string): string[] {
-  const found = stripIdentifiers(text).match(NUMBER_RE) ?? [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of found) {
-    const value = raw.trim();
-    // Bare years and small counts are rarely the numbers a reader wants.
-    if (/^\d{4}$/.test(value) && Number(value) > 1500 && Number(value) < 2100) continue;
-    if (seen.has(value)) continue;
-    seen.add(value);
-    out.push(value);
-  }
-  return out;
-}
-
 function blockText(block: Block): string {
   switch (block.type) {
     case 'heading':
@@ -239,6 +193,7 @@ export function buildPaperViews(doc: ParsedDoc, pmcid?: string): PaperViews {
     availability: [],
     claims: [],
     skim: [],
+    brief: { verdict: '', asked: '', did: '', found: '', caveat: '' },
   };
 
   let section = 'Overview';
@@ -247,10 +202,23 @@ export function buildPaperViews(doc: ParsedDoc, pmcid?: string): PaperViews {
   let availabilityTitle: string | null = null;
   const claims: ClaimItem[] = [];
   const skim: SkimSection[] = [];
-  let current: SkimSection | null = null;
+  let currentHeading: { id: string; title: string; depth: number } | null = null;
+  let sectionText = '';
 
   const pushSkim = () => {
-    if (current && (current.gist || current.numbers.length > 0 || current.words > 0)) skim.push(current);
+    if (!currentHeading) return;
+    const heading = currentHeading;
+    const body = sectionText;
+    currentHeading = null;
+    sectionText = '';
+    if (heading.depth === 1 || skipFromSkim(heading.title)) return;
+    const summarized = summarizeSection(heading.title, body, { id: heading.id, depth: heading.depth });
+    if (summarized.gist || summarized.numbers.length > 0 || summarized.words > 0) skim.push(summarized);
+  };
+
+  const appendSection = (text: string) => {
+    if (!text || !currentHeading) return;
+    sectionText = sectionText ? `${sectionText}\n${text}` : text;
   };
 
   for (let i = 0; i < doc.blocks.length; i++) {
@@ -270,7 +238,7 @@ export function buildPaperViews(doc: ParsedDoc, pmcid?: string): PaperViews {
         section = block.text;
         inSupplements = SUPPLEMENT_SECTION_RE.test(block.text.trim());
         availabilityTitle = AVAILABILITY_RE.test(block.text) ? block.text : null;
-        current = { id: block.id, title: block.text, depth: block.depth, gist: '', numbers: [], words: 0 };
+        currentHeading = { id: block.id, title: block.text, depth: block.depth };
         pendingFloat = null;
       }
       continue;
@@ -284,6 +252,7 @@ export function buildPaperViews(doc: ParsedDoc, pmcid?: string): PaperViews {
         block,
         section,
       });
+      appendSection(blockText(block));
       pendingFloat = null;
       continue;
     }
@@ -347,17 +316,9 @@ export function buildPaperViews(doc: ParsedDoc, pmcid?: string): PaperViews {
       views.availability.push({ title: availabilityTitle, text });
     }
 
-    if (current) {
-      current.words += text.split(/\s+/).filter(Boolean).length;
-      if (!current.gist && block.type === 'para' && text.length > 40) {
-        current.gist = splitSentences(text).slice(0, 2).join(' ');
-      }
-      for (const number of findNumbers(text)) {
-        if (current.numbers.length < 8 && !current.numbers.includes(number)) current.numbers.push(number);
-      }
-    }
+    appendSection(text);
 
-    if (block.type === 'para' || block.type === 'list' || block.type === 'quote') {
+    if (!isNonStudySection(section) && (block.type === 'para' || block.type === 'list' || block.type === 'quote')) {
       for (const sentence of splitSentences(text)) {
         const claim = scoreClaim(sentence, section);
         if (claim) claims.push(claim);
@@ -374,6 +335,7 @@ export function buildPaperViews(doc: ParsedDoc, pmcid?: string): PaperViews {
     .filter((claim, index, all) => all.findIndex((other) => other.text === claim.text) === index)
     .slice(0, 40);
   views.skim = skim;
+  views.brief = buildPaperBrief(skim);
   return views;
 }
 

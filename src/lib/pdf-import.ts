@@ -3,12 +3,14 @@ import {
   buildLines,
   buildMarkdown,
   findRunningLines,
+  liveSkimFromLines,
   median,
   orderColumns,
   type PdfLine,
   type PdfPage,
   type PdfSpan,
 } from './pdf-layout';
+import type { SkimSection } from './paper-skim';
 
 const MAX_PAGES = 80;
 
@@ -58,6 +60,8 @@ function spanFromItem(item: TextItemLike, styles: Record<string, { fontFamily?: 
 export interface PdfExtractionProgress {
   page: number;
   pages: number;
+  /** Section gists so far, updated as each page is read. */
+  sections: SkimSection[];
 }
 
 export interface PdfImportOptions {
@@ -141,7 +145,12 @@ export async function pdfToMarkdown(file: File | ArrayBuffer, options: PdfImport
       const pdfPage: PdfPage = { page: pageNumber, width: viewport.width, height: viewport.height, spans };
       pageLines.push(orderColumns(buildLines(pdfPage), viewport.width));
       page.cleanup();
-      options.onProgress?.({ page: pageNumber, pages: pageCount });
+      const soFar = pageLines.flat();
+      options.onProgress?.({
+        page: pageNumber,
+        pages: pageCount,
+        sections: liveSkimFromLines(soFar),
+      });
     }
 
     const running = findRunningLines(pageLines);

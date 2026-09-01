@@ -9,6 +9,7 @@ import {
   isPageNumber,
   joinParagraph,
   looksLikeEquation,
+  liveSkimFromLines,
   median,
   orderColumns,
   parseCaption,
@@ -220,6 +221,19 @@ describe('buildMarkdown', () => {
     expect(paragraphs).toHaveLength(2);
     expect(paragraphs[0]).toContain('Still the first paragraph.');
   });
+
+  it('splits a mashed first page onto Abstract and Introduction headings', () => {
+    const mashed = line(
+      'A toy assay for counting colonies Jane Q Public Abstract We count colonies with a simple grid. 1 Introduction Tuberculosis papers often hide behind CFU plots. 2 Methods Plates were split into sixty-four cells.',
+      { y: 80 },
+    );
+    const { markdown, counts } = buildMarkdown([mashed]);
+    expect(markdown).toContain('## Abstract');
+    expect(markdown).toContain('## 1 Introduction');
+    expect(markdown).toContain('## 2 Methods');
+    expect(markdown).toContain('We count colonies');
+    expect(counts.sections).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe('guessFrontMatter', () => {
@@ -245,5 +259,24 @@ describe('median', () => {
     expect(median([3, 1, 2])).toBe(2);
     expect(median([1, 2, 3, 4])).toBe(2.5);
     expect(median([])).toBe(0);
+  });
+});
+
+describe('liveSkimFromLines', () => {
+  it('emits section gists as soon as headings are visible', () => {
+    const lines = [
+      line('Abstract', { y: 80 }),
+      line('We found that treatment raised survival by 18% compared with placebo.', { y: 100 }),
+      line('Methods', { y: 140 }),
+      line('We enrolled 240 participants over 18 months at three sites.', { y: 160 }),
+      line('References', { y: 200 }),
+      line('1. Klein A. An older study. 2001.', { y: 220 }),
+    ];
+    const skim = liveSkimFromLines(lines);
+    const titles = skim.map((s) => s.title);
+    expect(titles).toContain('Abstract');
+    expect(titles).toContain('Methods');
+    expect(titles).not.toContain('References');
+    expect(skim.find((s) => s.title === 'Abstract')!.gist).toMatch(/18%/);
   });
 });

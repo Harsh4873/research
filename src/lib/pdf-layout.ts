@@ -1,10 +1,5 @@
-/**
- * Layout reconstruction for PDF text.
- *
- * PDFs carry positioned glyph runs, not structure. Everything here is pure so
- * the heuristics that rebuild lines, columns, headings, tables, and equations
- * can be unit-tested without a PDF engine.
- */
+import { summarizeSection, type SkimSection } from './paper-skim';
+import { explodeToLines, PAPER_SECTION_NAMES, prettySectionName, skipFromSkim } from './section-split';
 
 export interface PdfSpan {
   text: string;
@@ -44,39 +39,7 @@ export interface PdfPage {
   spans: PdfSpan[];
 }
 
-const SECTION_WORDS = [
-  'abstract',
-  'summary',
-  'introduction',
-  'background',
-  'related work',
-  'materials and methods',
-  'methods and materials',
-  'methods',
-  'materials',
-  'experimental procedures',
-  'results',
-  'results and discussion',
-  'discussion',
-  'conclusion',
-  'conclusions',
-  'limitations',
-  'future work',
-  'acknowledgements',
-  'acknowledgments',
-  'author contributions',
-  'funding',
-  'competing interests',
-  'conflict of interest',
-  'data availability',
-  'code availability',
-  'supplementary material',
-  'supplementary information',
-  'supporting information',
-  'references',
-  'bibliography',
-  'appendix',
-];
+const SECTION_WORDS: readonly string[] = PAPER_SECTION_NAMES;
 
 const CAPTION_RE = /^(table|fig(?:ure)?\.?|scheme|box|algorithm)\s*([0-9IVXivx]+[a-z]?)\s*[.:—–-]?\s*(.*)$/i;
 const NUMBERED_HEADING_RE = /^(\d{1,2}(?:\.\d{1,2}){0,2})[.)]?\s+(\S.*)$/;
@@ -243,7 +206,7 @@ export function classifyHeading(line: PdfLine, bodySize: number): HeadingInfo | 
   const lower = text.toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
   const numbered = text.match(NUMBERED_HEADING_RE);
 
-  if (SECTION_WORDS.includes(lower)) return { level: 2, title: titleCase(text) };
+  if (SECTION_WORDS.includes(lower)) return { level: 2, title: prettySectionName(text) };
   if (numbered) {
     const depth = numbered[1].split('.').filter(Boolean).length;
     const body = numbered[2].trim();
@@ -260,16 +223,8 @@ export function classifyHeading(line: PdfLine, bodySize: number): HeadingInfo | 
   return null;
 }
 
-function titleCase(text: string): string {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (clean === clean.toUpperCase()) {
-    return clean
-      .toLowerCase()
-      .replace(/\b([a-z])/g, (m) => m.toUpperCase())
-      .replace(/\bAnd\b/g, 'and')
-      .replace(/\bOf\b/g, 'of');
-  }
-  return clean;
+export function titleCase(text: string): string {
+  return prettySectionName(text);
 }
 
 export function parseCaption(text: string): { label: string; rest: string } | null {
@@ -293,6 +248,30 @@ export function joinParagraph(lines: string[]): string {
     else out = `${out} ${piece}`;
   }
   return out.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Split a visual line that glued a heading onto its first sentence
+ * (`Abstract We counted…`) into separate lines so heading detection can fire.
+ */
+export function expandPdfLines(lines: PdfLine[]): PdfLine[] {
+  const out: PdfLine[] = [];
+  for (const line of lines) {
+    const pieces = explodeToLines(line.text);
+    if (pieces.length <= 1) {
+      out.push(line);
+      continue;
+    }
+    for (const piece of pieces) {
+      out.push({
+        ...line,
+        text: piece,
+        cells: [piece],
+        cellStops: [line.x],
+      });
+    }
+  }
+  return out;
 }
 
 /** Consecutive multi-column lines with aligned column starts are a table. */
@@ -339,22 +318,51 @@ export interface BuiltDocument {
  * `lines` must already be in reading order across the whole document.
  */
 export function buildMarkdown(lines: PdfLine[], options: DocumentBuildOptions = {}): BuiltDocument {
-  const bodySize = median(lines.map((line) => line.size)) || 10;
+  const ordered = expandPdfLines(lines);
+  const bodySize = median(ordered.map((line) => line.size)) || 10;
   const out: string[] = [];
   const counts = { sections: 0, tables: 0, figures: 0, equations: 0 };
   let paragraph: string[] = [];
   let inReferences = false;
   const references: string[] = [];
 
+  const emitProse = (text: string) => {
+    const pieces = explodeToLines(text);
+    for (const piece of pieces) {
+      const fake: PdfLine = {
+        text: piece,
+        x: 0,
+        right: 0,
+        y: 0,
+        size: bodySize,
+        bold: false,
+        page: 1,
+        gaps: [],
+        stops: [],
+        cells: [piece],
+        cellStops: [0],
+      };
+      const heading = classifyHeading(fake, bodySize);
+      if (heading) {
+        const isRefs = /^(references|bibliography)$/i.test(heading.title.trim());
+        inReferences = isRefs;
+        out.push(`${'#'.repeat(heading.level)} ${heading.title}`);
+        counts.sections += 1;
+      } else if (piece.length > 1) {
+        out.push(piece);
+      }
+    }
+  };
+
   const flush = () => {
     if (paragraph.length === 0) return;
     const text = joinParagraph(paragraph);
     paragraph = [];
-    if (text.length > 1) out.push(text);
+    if (text.length > 1) emitProse(text);
   };
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (let i = 0; i < ordered.length; i++) {
+    const line = ordered[i];
     const text = line.text.trim();
     if (!text || isPageNumber(text)) continue;
 
@@ -382,9 +390,9 @@ export function buildMarkdown(lines: PdfLine[], options: DocumentBuildOptions = 
       if (/^Table/.test(caption.label)) counts.tables += 1;
       else counts.figures += 1;
       // A table body usually follows its caption.
-      const end = detectTableRun(lines, i + 1);
+      const end = detectTableRun(ordered, i + 1);
       if (end > i + 1) {
-        const rows = lines.slice(i + 1, end).map((row) => splitRow(row));
+        const rows = ordered.slice(i + 1, end).map((row) => splitRow(row));
         const width = Math.max(...rows.map((row) => row.length), 2);
         const pad = (row: string[]) => {
           const copy = row.map((cell) => cell.replace(/\|/g, '\\|'));
@@ -409,7 +417,7 @@ export function buildMarkdown(lines: PdfLine[], options: DocumentBuildOptions = 
 
     // A large vertical gap or a sentence end followed by a fresh capital
     // starts a new paragraph.
-    const previous = lines[i - 1];
+    const previous = ordered[i - 1];
     if (previous && paragraph.length > 0) {
       const gap = line.y - previous.y;
       const newBlock = gap > line.size * 2.1 || (previous.page !== line.page && /[.!?]$/.test(previous.text));
@@ -426,6 +434,40 @@ export function buildMarkdown(lines: PdfLine[], options: DocumentBuildOptions = 
   }
 
   return { markdown: out.join('\n\n'), counts };
+}
+
+/**
+ * Skim cards from PDF lines as pages arrive, before the markdown is finished.
+ * Same heading split and scoring as the saved Skim tab.
+ */
+export function liveSkimFromLines(lines: PdfLine[]): SkimSection[] {
+  const ordered = expandPdfLines(lines);
+  const bodySize = median(ordered.map((line) => line.size)) || 10;
+  const buckets: Array<{ title: string; depth: number; text: string }> = [];
+  let current: { title: string; depth: number; text: string } | null = null;
+
+  const push = () => {
+    if (!current) return;
+    if (!skipFromSkim(current.title) && current.text.trim()) buckets.push(current);
+    current = null;
+  };
+
+  for (const line of ordered) {
+    const text = line.text.trim();
+    if (!text || isPageNumber(text)) continue;
+    const heading = classifyHeading(line, bodySize);
+    if (heading) {
+      push();
+      current = { title: heading.title, depth: heading.level, text: '' };
+      continue;
+    }
+    if (current) current.text = current.text ? `${current.text}\n${text}` : text;
+  }
+  push();
+
+  return buckets.map((bucket, index) =>
+    summarizeSection(bucket.title, bucket.text, { id: `live-${index}`, depth: bucket.depth }),
+  );
 }
 
 /** Reference lists wrap across lines; start a new entry at a numeric marker. */
