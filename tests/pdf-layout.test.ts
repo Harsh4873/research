@@ -249,6 +249,17 @@ describe('guessFrontMatter', () => {
     expect(guessed.authors).toEqual(['Ana Rivera', 'Chidi Okafor', 'Lee Park']);
   });
 
+  it('does not swallow a same-size author line into the title', () => {
+    const first = [
+      line('Measuring bacterial growth precisely', { size: 12, y: 60 }),
+      line('Ana Rivera, Chidi Okafor, Lee Park', { size: 12, y: 90 }),
+      line('Abstract', { size: 12, y: 130 }),
+    ];
+    const guessed = guessFrontMatter(first, 'fallback');
+    expect(guessed.title).toBe('Measuring bacterial growth precisely');
+    expect(guessed.authors).toEqual(['Ana Rivera', 'Chidi Okafor', 'Lee Park']);
+  });
+
   it('falls back to the supplied name when the page has nothing usable', () => {
     expect(guessFrontMatter([], 'my-paper').title).toBe('my-paper');
   });

@@ -1350,6 +1350,7 @@ button.skim-card:hover {
   font-size: 17px;
   font-weight: 650;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .skim-slots {
@@ -1370,6 +1371,7 @@ button.skim-card:hover {
   margin: 6px 0 0;
   font-size: 13.5px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .skim-slot-label {

@@ -75,6 +75,12 @@ export interface PdfImportOptions {
 
 const DOI_IN_TEXT = /\b(10\.\d{4,9}\/[^\s"'<>,;]+)/;
 
+function looksLikeAuthorLine(text: string): boolean {
+  const clean = text.trim();
+  if (!clean || /^(abstract|introduction|methods|results|discussion)/i.test(clean)) return false;
+  return /,/.test(clean) && /^[A-Z]/.test(clean) && clean.split(/,/).length >= 2 && clean.length < 300 && !/\d{4}/.test(clean);
+}
+
 /** Guess title and authors from the first page's largest text. */
 export function guessFrontMatter(firstPageLines: PdfLine[], fallbackTitle: string): { title: string; authors: string[] } {
   const candidates = firstPageLines.slice(0, 18).filter((line) => line.text.trim().length > 6);
@@ -86,11 +92,18 @@ export function guessFrontMatter(firstPageLines: PdfLine[], fallbackTitle: strin
     const line = candidates[i];
     if (line.size < maxSize * 0.94) continue;
     if (/^(original|research|article|review|report|open access|received|accepted|published|doi|www\.)/i.test(line.text)) continue;
+    if (looksLikeAuthorLine(line.text)) continue;
     titleLines.push(line.text.trim());
     titleIndex = i;
-    // Titles can wrap onto the next line at the same size.
+    // Titles can wrap onto the next line at the same size, but author lists
+    // are often set in that same size and must not become the title.
     const next = candidates[i + 1];
-    if (next && next.size >= maxSize * 0.94 && !/^(abstract|introduction)/i.test(next.text)) {
+    if (
+      next &&
+      next.size >= maxSize * 0.94 &&
+      !/^(abstract|introduction)/i.test(next.text) &&
+      !looksLikeAuthorLine(next.text)
+    ) {
       titleLines.push(next.text.trim());
       titleIndex = i + 1;
     }
@@ -102,9 +115,7 @@ export function guessFrontMatter(firstPageLines: PdfLine[], fallbackTitle: strin
   for (let i = titleIndex + 1; i < Math.min(candidates.length, titleIndex + 4); i++) {
     const text = candidates[i].text.trim();
     if (/^abstract/i.test(text)) break;
-    const looksLikeAuthors =
-      /,/.test(text) && /^[A-Z]/.test(text) && text.split(/,/).length >= 2 && text.length < 300 && !/\d{4}/.test(text);
-    if (looksLikeAuthors) {
+    if (looksLikeAuthorLine(text)) {
       for (const name of text.split(/,| and /i)) {
         const clean = name
           .replace(/[*†‡§¶#0-9]+/g, '')
