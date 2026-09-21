@@ -1,13 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GraduationCap, Monitor, Moon, Sun } from 'lucide-react';
 import type { AppData, Mode, StudyMaterial, StudySet, SyncStatus, Theme } from './model';
 import { MODES } from './model';
 import type { CloudEngine } from './lib/cloud';
 import { extractStudyMaterial } from './lib/extract';
-import { parseMarkdown } from './lib/markdown';
-import { normalizeHtmlInMarkdown } from './lib/html-text';
 import {
-  createSet,
   deleteSet,
   exportSetJson,
   getProgress,
@@ -15,7 +12,6 @@ import {
   loadData,
   loadOrAdoptOwnerVaultData,
   nextDataTimestamp,
-  parseSetExport,
   readActiveAccountId,
   recordAnswer,
   saveAccountData,
@@ -26,11 +22,8 @@ import {
   writeActiveAccountId,
 } from './lib/store';
 import { recordBestMatch } from './lib/sync-core';
-import { SAMPLE_MARKDOWN, SAMPLE_TITLE } from './lib/sample';
-import { Library, type ImportItem } from './components/Library';
 import { SetShell } from './components/SetShell';
 import { SyncMenu } from './components/SyncMenu';
-import { Landing } from './components/Landing';
 import { ReviewView, type BulkOutcome, type ImportStatus, type PaperDraft } from './components/ReviewView';
 import { createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
 import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
@@ -58,8 +51,6 @@ function setSyncFlag(on: boolean) {
 }
 
 type Route =
-  | { view: 'home' }
-  | { view: 'library' }
   | { view: 'review' }
   | { view: 'set'; setId: string; mode: Mode };
 
@@ -68,14 +59,11 @@ function parseHash(): Route {
   if (parts[0] === 'set' && parts[1]) {
     const mode = (MODES as readonly string[]).includes(parts[2])
       ? (parts[2] as Mode)
-      : isPaperSet(parts[1])
-        ? 'skim'
-        : 'notes';
+      : 'skim';
     return { view: 'set', setId: parts[1], mode };
   }
-  if (parts[0] === 'recall' || parts[0] === 'flashcards') return { view: 'library' };
-  if (parts[0] === 'review' || parts[0] === 'papers') return { view: 'review' };
-  return { view: 'home' };
+  // Flashcards moved to harsh.bet/quizlet/; old hashes land on papers.
+  return { view: 'review' };
 }
 
 function navigate(hash: string) {
@@ -147,8 +135,16 @@ export default function App() {
   };
 
   useEffect(() => {
-    const onHash = () => setRoute(parseHash());
+    const onHash = () => {
+      const raw = window.location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+      if (raw[0] === 'flashcards' || raw[0] === 'recall') {
+        navigate('/papers');
+        return;
+      }
+      setRoute(parseHash());
+    };
     window.addEventListener('hashchange', onHash);
+    onHash();
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
@@ -186,56 +182,10 @@ export default function App() {
     return material;
   };
 
-  const importItems = (items: ImportItem[]) => {
-    const created: StudySet[] = [];
-    const errors: string[] = [];
-    let next = data;
-    for (const item of items) {
-      if (item.error) {
-        errors.push(item.error);
-        continue;
-      }
-      try {
-        let markdown = item.markdown ?? '';
-        let title = item.title;
-        if (item.json !== undefined) {
-          const parsed = parseSetExport(item.json);
-          markdown = parsed.markdown;
-          title = parsed.title;
-        }
-        if (!markdown.trim()) {
-          errors.push('Nothing to import — the file was empty.');
-          continue;
-        }
-        // Text copied from a web page carries HTML; store it as markdown.
-        markdown = normalizeHtmlInMarkdown(markdown);
-        const docTitle = parseMarkdown(markdown).title;
-        const set = createSet(title || docTitle || 'Untitled set', markdown, nextDataTimestamp(next));
-        next = upsertSet(next, set);
-        created.push(set);
-      } catch {
-        errors.push(item.title ? `“${item.title}” is not a valid export.` : 'That JSON is not a valid export.');
-      }
-    }
-    setData(next);
-    if (errors.length > 0) setNotice(errors[0]);
-    else if (created.length > 1) setNotice(`Imported ${created.length} sets.`);
-    if (created.length === 1) navigate(`/set/${created[0].id}/notes`);
-  };
-
-  const loadSample = () => {
-    const existing = data.sets.find((s) => s.title === SAMPLE_TITLE);
-    if (existing) {
-      navigate(`/set/${existing.id}/notes`);
-      return;
-    }
-    importItems([{ title: SAMPLE_TITLE, markdown: SAMPLE_MARKDOWN }]);
-  };
-
   const removeSet = (set: StudySet) => {
     if (!window.confirm(`Remove “${set.title}” and its progress? This also removes it from synced devices.`)) return;
     setData((d) => deleteSet(d, set.id, nextDataTimestamp(d)));
-    if (route.view === 'set' && route.setId === set.id) navigate(isPaperSet(set.id) ? '/papers' : '/flashcards');
+    if (route.view === 'set' && route.setId === set.id) navigate('/papers');
   };
 
   /** Review: resolve a PMID / PMCID / DOI into study markdown. */
@@ -279,8 +229,6 @@ export default function App() {
       onStatus(`Fetching ${index + 1} of ${ids.length} — ${describePaperId(id)}…`);
       try {
         const result = await lookup(id);
-        // A reference list cites the same paper by PMID, DOI, and PMCID, and
-        // some of them may already be in the library.
         const identity = paperIdentity(result.meta);
         if (seen.has(identity)) continue;
         seen.add(identity);
@@ -330,8 +278,6 @@ export default function App() {
     try {
       const { lookupPaper: lookup } = await import('./lib/europepmc');
       const result = await lookup(id);
-      // Never trade a full text for an abstract: a transient outage upstream
-      // must not quietly shrink what is already saved.
       if (wasAbstractOnly === false && !result.fullText) {
         return 'The source only offered the abstract this time, so the saved copy was kept.';
       }
@@ -364,7 +310,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${set.title.replace(/[^\w\d-]+/g, '-').replace(/^-+|-+$/g, '') || 'recall-set'}.json`;
+    a.download = `${set.title.replace(/[^\w\d-]+/g, '-').replace(/^-+|-+$/g, '') || 'research-paper'}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -415,10 +361,17 @@ export default function App() {
     setData((d) => ({ ...d, theme: order[(order.indexOf(d.theme) + 1) % order.length] }));
   };
 
-  const activeSet = route.view === 'set' ? data.sets.find((s) => s.id === route.setId) : undefined;
+  const paperData: AppData = {
+    ...data,
+    sets: data.sets.filter((set) => isPaperSet(set.id)),
+  };
+
+  const activeSet = route.view === 'set'
+    ? paperData.sets.find((s) => s.id === route.setId)
+    : undefined;
 
   useEffect(() => {
-    if (route.view === 'set' && !activeSet) navigate('/');
+    if (route.view === 'set' && !activeSet) navigate('/papers');
   }, [route, activeSet]);
 
   const themeIcon = data.theme === 'light' ? <Sun size={16} aria-hidden /> : data.theme === 'dark' ? <Moon size={16} aria-hidden /> : <Monitor size={16} aria-hidden />;
@@ -427,20 +380,13 @@ export default function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="header-inner">
-          <button type="button" className="brand" onClick={() => navigate('/')}>
+          <button type="button" className="brand" onClick={() => navigate('/papers')}>
             <span className="brand-badge">
               <GraduationCap size={18} aria-hidden />
             </span>
             Research
           </button>
           <nav className="header-nav" aria-label="Sections">
-            <button
-              type="button"
-              className={`header-tab header-tab-study ${route.view === 'library' ? 'header-tab-active' : ''}`}
-              onClick={() => navigate('/flashcards')}
-            >
-              Flashcards
-            </button>
             <button
               type="button"
               className={`header-tab header-tab-papers ${route.view === 'review' ? 'header-tab-active' : ''}`}
@@ -483,8 +429,8 @@ export default function App() {
             progress={getProgress(data, activeSet.id)}
             mode={route.mode}
             onNavigate={(mode) => navigate(`/set/${activeSet.id}/${mode}`)}
-            onBack={() => navigate(isPaperSet(activeSet.id) ? '/papers' : '/flashcards')}
-            backLabel={isPaperSet(activeSet.id) ? 'Papers' : 'Flashcards'}
+            onBack={() => navigate('/papers')}
+            backLabel="Papers"
             onAnswer={answerFor(activeSet.id)}
             onToggleStar={starFor(activeSet.id)}
             onBestTime={bestTimeFor(activeSet.id)}
@@ -494,9 +440,9 @@ export default function App() {
             onExport={() => exportSet(activeSet)}
             onRefresh={refreshPaper}
           />
-        ) : route.view === 'review' ? (
+        ) : (
           <ReviewView
-            data={data}
+            data={paperData}
             materialFor={materialFor}
             onLookup={lookupPaper}
             onLookupMany={lookupPapers}
@@ -508,23 +454,11 @@ export default function App() {
             onDelete={removeSet}
             onExport={exportSet}
           />
-        ) : route.view === 'library' ? (
-          <Library
-            data={{ ...data, sets: data.sets.filter((set) => !isPaperSet(set.id)) }}
-            materialFor={materialFor}
-            onImport={importItems}
-            onLoadSample={loadSample}
-            onDelete={removeSet}
-            onExport={exportSet}
-            onOpen={(set) => navigate(`/set/${set.id}/notes`)}
-          />
-        ) : (
-          <Landing data={data} onFlashcards={() => navigate('/flashcards')} onPapers={() => navigate('/papers')} />
         )}
       </main>
 
       <footer className="app-footer">
-        Notes and papers stay on this device. Turn on Sync only if you want them on your other devices.
+        Papers stay on this device. Turn on Sync only if you want them on your other devices.
       </footer>
     </div>
   );

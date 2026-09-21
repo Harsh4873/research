@@ -1,6 +1,6 @@
 # Architecture
 
-Research is a client-side React + Vite single-page app (Recall for notes, Review for papers); the deployed site is static files on GitHub Pages served under `/research/`. There is no app server. The only runtime network I/O is the optional Firebase sync (Google auth + Firestore), which stays completely unloaded until the user turns Sync on.
+Research is a client-side React + Vite single-page app for paper reading (skim, notes, data, claims, find); the deployed site is static files on GitHub Pages served under `/research/`. There is no app server. The only runtime network I/O is the optional Firebase sync (Google auth + Firestore), which stays completely unloaded until the user turns Sync on. Flashcards live in `Harsh4873/quizlet`.
 
 ## Pipeline
 

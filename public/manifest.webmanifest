@@ -1,7 +1,7 @@
 {
-  "name": "Research — Flashcards and papers",
+  "name": "Research — Papers",
   "short_name": "Research",
-  "description": "Flashcards from your notes, or papers you drop in. Everything stays on this device.",
+  "description": "Read papers: skim, notes, data, claims, and find. Everything stays on this device.",
   "id": "/research/",
   "start_url": "/research/",
   "scope": "/research/",
@@ -26,12 +26,6 @@
     }
   ],
   "shortcuts": [
-    {
-      "name": "Flashcards",
-      "short_name": "Flashcards",
-      "url": "/research/#/flashcards",
-      "icons": [{ "src": "/research/icon-192.png", "sizes": "192x192" }]
-    },
     {
       "name": "Papers",
       "short_name": "Papers",

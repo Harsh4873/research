@@ -1,11 +1,10 @@
 # Research
 
-Research is the owner's personal reading and study tool, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. It has two halves:
+Research is the owner's personal paper reader, published at `https://harsh.bet/research/` from the standalone `Harsh4873/research` repository. Flashcards live in [`Harsh4873/quizlet`](https://github.com/Harsh4873/quizlet) at `https://harsh.bet/quizlet/`.
 
-- **Recall** — paste or upload Markdown notes and turn them into study material: flashcards, quizzes, fill-in-the-blanks, and a matching game.
-- **Review** — give it a PMID, PMCID, DOI, or a PDF and read the paper fast: skim, notes, data, claims, and find.
+- **Papers** — give it a PMID, PMCID, DOI, or a PDF and read the paper fast: skim, notes, data, claims, and find.
 
-Both share the same clean reading view with read-aloud, and turning on Sync keeps everything on every signed-in device (phone and laptop).
+Turning on Sync keeps papers on every signed-in device (phone and laptop).
 
 ## Review: read papers fast
 
@@ -26,7 +25,7 @@ Both share the same clean reading view with read-aloud, and turning on Sync keep
   - **Claims** — the sentences where the authors say what they found, filtered by findings / conclusions / quantified results.
   - **Find** — instant search across the paper, plus a Numbers mode listing every effect size, p-value, percentage, and count with its sentence.
   - **Skim** — the paper in one pass (what was asked, what they did, what they found, what to watch for), then a section-by-section gist that prefers findings and numbers over the first sentence. Dropped PDFs stream these cards as headings appear.
-- Papers still sync and export like any other set; Recall keeps the flashcards, quiz, blanks, and match.
+- Papers still sync and export like any other set. Exam flashcards live in Quizlet.
 
 All lookups use free, key-less public APIs (Europe PMC and NCBI E-utilities) straight from the browser; there is no backend.
 
