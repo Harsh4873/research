@@ -619,14 +619,14 @@ button {
 /* ---------- Review ---------- */
 
 .review-hero {
-  padding: 26px 0 18px;
+  padding: 8px 0 12px;
 }
 
 .review-title {
   display: flex;
   align-items: center;
   gap: 11px;
-  font-size: clamp(25px, 4vw, 33px);
+  font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.025em;
   margin: 0 0 10px;
@@ -1735,26 +1735,26 @@ textarea.review-input {
 
 .sets-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
-  gap: 22px;
+  grid-template-columns: 1fr;
+  gap: 8px;
 }
 
 .set-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 240px;
+  min-height: 0;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 20px;
-  box-shadow: var(--shadow);
-  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  border-radius: 12px;
+  box-shadow: none;
+  transition: border-color 0.12s ease;
   overflow: hidden;
 }
 
 .set-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-lift);
+  transform: none;
+  box-shadow: none;
   border-color: var(--border-strong);
 }
 
@@ -1766,17 +1766,17 @@ textarea.review-input {
   text-align: left;
   background: none;
   border: 0;
-  padding: 28px 26px 22px;
+  padding: 14px 16px 12px;
   cursor: pointer;
 }
 
 .set-card-title {
-  font-size: clamp(20px, 2.1vw, 24px);
-  font-weight: 800;
-  letter-spacing: -0.025em;
-  line-height: 1.25;
-  margin-bottom: 12px;
-  padding-right: 84px;
+  font-size: 16.5px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  margin-bottom: 4px;
+  padding-right: 76px;
   overflow-wrap: anywhere;
 }
 
@@ -1802,8 +1802,8 @@ textarea.review-input {
 }
 
 .set-card .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
 }
 
 .set-card .mastery-bar {
@@ -3174,4 +3174,307 @@ textarea.review-input {
   border: 1px solid var(--accent-line);
   background: var(--accent-soft);
   font-size: 13.5px;
+}
+
+/* ---------- Paper reader: PDF and a tool sidebar ---------- */
+
+.app-shell-reader {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app-shell-reader .app-main {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell-reader .app-footer {
+  display: none;
+}
+
+.app-shell-reader .header-inner {
+  width: min(1600px, 100% - 28px);
+}
+
+.paper-reader {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+}
+
+.reader-doc {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--text) 7%, var(--bg));
+}
+
+.reader-side {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+.reader-side-head {
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.reader-side-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reader-title {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.reader-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.reader-meta a {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.reader-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.reader-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.reader-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 650;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.reader-tab:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.reader-tab-active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.reader-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 32px;
+}
+
+.reader-side .notes-layout {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.reader-side .outline {
+  position: static;
+  max-height: 180px;
+}
+
+.reader-side .mode-empty {
+  margin: 8px 0;
+  padding: 22px 14px;
+}
+
+.reader-side .source-editor,
+.reader-side .refresh-note {
+  margin: 8px 12px;
+}
+
+.cite-jump {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  text-underline-offset: 3px;
+}
+
+.cite-jump:hover {
+  background: var(--accent-soft);
+  border-radius: 4px;
+}
+
+.pdf-stack,
+.article-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pdf-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 12px 48px;
+}
+
+.pdf-page {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16), 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.pdf-page canvas {
+  display: block;
+}
+
+.pdf-mark {
+  position: absolute;
+  background: rgba(250, 204, 21, 0.45);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.pdf-page-num {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  color: #667;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.article-pane {
+  background: var(--panel);
+}
+
+.article-pane .article {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 8px 28px 72px;
+}
+
+.article-attach {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 760px;
+  margin: 16px auto 0;
+  padding: 0 28px;
+  color: var(--text-soft);
+  font-size: 13.5px;
+}
+
+.article-pane-drop {
+  outline: 2px dashed var(--accent);
+  outline-offset: -8px;
+}
+
+.source-hit {
+  background: color-mix(in srgb, var(--study) 24%, transparent);
+  border-radius: 6px;
+}
+
+.doc-status,
+.locate-miss {
+  margin: 16px;
+  color: var(--text-soft);
+  font-size: 14px;
+}
+
+.locate-miss {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+  align-self: stretch;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-soft);
+  color: var(--text);
+}
+
+.reader-switch {
+  display: none;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+
+.reader-switch button {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.reader-switch-on {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-color: transparent;
+}
+
+@media (max-width: 900px) {
+  .paper-reader {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-reader[data-pane='doc'] .reader-side {
+    display: none;
+  }
+
+  .paper-reader[data-pane='tools'] .reader-doc {
+    display: none;
+  }
+
+  .reader-switch {
+    display: flex;
+  }
 }

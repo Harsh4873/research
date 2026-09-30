@@ -33,6 +33,8 @@ import { LiveSkimList, SkimReport } from './PaperViews';
 export interface PaperDraft extends PaperConversion {
   fullText: boolean;
   note: string;
+  /** Kept when the import already has the file, so the reader can scroll it. */
+  pdf?: ArrayBuffer;
 }
 
 export interface BulkOutcome {
@@ -415,7 +417,7 @@ export function ReviewView(props: ReviewViewProps) {
 
             <div className="review-result-actions">
               <button type="button" className="btn btn-primary" onClick={() => props.onSave(draft)}>
-                Open skim <ArrowRight size={16} aria-hidden />
+                Open <ArrowRight size={16} aria-hidden />
               </button>
               <button
                 type="button"

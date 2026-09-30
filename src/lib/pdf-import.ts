@@ -30,7 +30,7 @@ interface TextItemLike {
  * (`Math.sumPrecise`, `Map.getOrInsertComputed`) that most shipping browsers,
  * including current mobile Safari, do not have yet.
  */
-async function loadPdfjs() {
+export async function loadPdfjs() {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const worker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
@@ -133,7 +133,9 @@ export function guessFrontMatter(firstPageLines: PdfLine[], fallbackTitle: strin
 export async function pdfToMarkdown(file: File | ArrayBuffer, options: PdfImportOptions = {}): Promise<PaperConversion> {
   const pdfjs = await loadPdfjs();
   const data = file instanceof ArrayBuffer ? file : await file.arrayBuffer();
-  const task = pdfjs.getDocument({ data: new Uint8Array(data), useSystemFonts: true });
+  // Copy before handing the bytes to the worker. The worker may detach its view,
+  // and the caller still needs the original buffer to show the PDF.
+  const task = pdfjs.getDocument({ data: new Uint8Array(data.slice(0)), useSystemFonts: true });
   const doc = await task.promise;
 
   try {

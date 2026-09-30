@@ -25,6 +25,7 @@ import { QuizView } from './QuizView';
 import { ClozeView } from './ClozeView';
 import { MatchView } from './MatchView';
 import { ClaimsView, DataView, FindView, SkimView } from './PaperViews';
+import { PaperReader } from './PaperReader';
 
 interface SetShellProps {
   set: StudySet;
@@ -44,6 +45,9 @@ interface SetShellProps {
   onExport: () => void;
   /** Re-fetch a paper from its identifier; returns what changed, for the notice. */
   onRefresh?: (set: StudySet) => Promise<string>;
+  pdfBytes?: ArrayBuffer | null;
+  pdfStatus?: 'loading' | 'checking' | 'ready' | 'missing';
+  onAttachPdf?: (file: File) => void;
 }
 
 const STUDY_TABS: { mode: Mode; label: string; icon: typeof BookOpen }[] = [
@@ -75,6 +79,26 @@ export function SetShell(props: SetShellProps) {
   // Papers are for reading; note sets are for studying.
   const isPaper = isPaperSet(set.id);
   const tabs = isPaper ? PAPER_TABS : STUDY_TABS;
+  if (isPaper) {
+    return (
+      <PaperReader
+        set={set}
+        material={material}
+        mode={mode}
+        onNavigate={onNavigate}
+        onBack={onBack}
+        backLabel={backLabel}
+        onSaveMarkdown={props.onSaveMarkdown}
+        onAddNote={props.onAddNote}
+        onDelete={props.onDelete}
+        onExport={props.onExport}
+        onRefresh={props.onRefresh}
+        pdfBytes={props.pdfBytes ?? null}
+        pdfStatus={props.pdfStatus ?? 'missing'}
+        onAttachPdf={props.onAttachPdf ?? (() => {})}
+      />
+    );
+  }
   const front = isPaper ? paperFrontMatter(set.markdown) : {};
   const subtitle = isPaper ? paperSubtitle(front) : '';
   const doi = front.doi;

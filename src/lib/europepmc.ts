@@ -265,6 +265,25 @@ export interface LookupResult extends PaperConversion {
   /** Whether the machine-readable full text was available. */
   fullText: boolean;
   openAccessNote: string;
+  /** PDF bytes when this import already downloaded one. Kept so the reader can show the file. */
+  pdf?: ArrayBuffer;
+}
+
+/**
+ * Download the open-access PDF for a PMC article, when the browser is allowed to read it.
+ * Returns null for paywalled files, HTML walls, and network failures.
+ */
+export async function fetchOpenAccessPdf(pmcid: string, signal?: AbortSignal): Promise<ArrayBuffer | null> {
+  const id = normalizePmcid(pmcid);
+  const urls = [
+    `https://europepmc.org/articles/${id}?pdf=render`,
+    `https://europepmc.org/backend/ptpmcrender.fcgi?accid=${id}&blobtype=pdf`,
+  ];
+  for (const url of urls) {
+    const buf = await fetchPdfBuffer(url, signal);
+    if (buf) return buf;
+  }
+  return null;
 }
 
 /** Resolve an identifier all the way to study markdown. */
@@ -357,6 +376,7 @@ export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<Lo
         ...converted,
         fullText: true,
         openAccessNote: 'Full text from the open-access publisher PDF.',
+        pdf: buf,
       };
     } catch {
       /* try the next URL */

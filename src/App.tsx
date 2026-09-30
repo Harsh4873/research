@@ -27,6 +27,7 @@ import { SyncMenu } from './components/SyncMenu';
 import { ReviewView, type BulkOutcome, type ImportStatus, type PaperDraft } from './components/ReviewView';
 import { createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
 import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
+import { deletePdf, getPdf, putPdf } from './lib/pdf-store';
 
 /** A reference list can be long; keep one paste from running away. */
 const MAX_BULK_LOOKUPS = 120;
@@ -79,6 +80,12 @@ export default function App() {
   dataRef.current = data;
   const [route, setRoute] = useState<Route>(parseHash);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pdfSession, setPdfSession] = useState<{
+    id: string;
+    status: 'loading' | 'checking' | 'ready' | 'missing';
+    bytes: ArrayBuffer | null;
+  }>({ id: '', status: 'missing', bytes: null });
+  const pdfToken = useRef(0);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'off' });
   const cloudRef = useRef<CloudEngine | null>(null);
 
@@ -184,6 +191,7 @@ export default function App() {
 
   const removeSet = (set: StudySet) => {
     if (!window.confirm(`Remove “${set.title}” and its progress? This also removes it from synced devices.`)) return;
+    void deletePdf(set.id);
     setData((d) => deleteSet(d, set.id, nextDataTimestamp(d)));
     if (route.view === 'set' && route.setId === set.id) navigate('/papers');
   };
@@ -203,7 +211,8 @@ export default function App() {
   const importPdf = async (file: File, onStatus: ImportStatus): Promise<PaperDraft> => {
     onStatus('Opening the PDF…');
     const { pdfToMarkdown } = await import('./lib/pdf-import');
-    const conversion = await pdfToMarkdown(file, {
+    const pdf = await file.arrayBuffer();
+    const conversion = await pdfToMarkdown(pdf, {
       fallbackTitle: file.name,
       onProgress: ({ page, pages, sections }) =>
         onStatus(`Reading page ${page} of ${pages}…`, { sections }),
@@ -212,7 +221,8 @@ export default function App() {
     return {
       ...conversion,
       fullText: true,
-      note: 'Extracted from your PDF on this device. Layout-based extraction is best effort — use the pencil icon in the set to fix anything that came out wrong.',
+      pdf,
+      note: 'Extracted from your PDF on this device. Layout-based extraction is best effort. Use the pencil icon to fix anything that came out wrong.',
     };
   };
 
@@ -251,12 +261,19 @@ export default function App() {
     return read(file);
   };
 
-  const savePaper = (draft: PaperDraft) => {
+  const savePaper = async (draft: PaperDraft) => {
     const created = createPaperSet(
       draft.meta.title,
       draft.markdown,
       nextDataTimestamp(dataRef.current),
     );
+    if (draft.pdf) {
+      try {
+        await putPdf(created.id, draft.pdf.slice(0));
+      } catch {
+        /* the paper still opens from its text */
+      }
+    }
     setData((d) => upsertSet(d, created));
     navigate(`/set/${created.id}/skim`);
   };
@@ -295,13 +312,11 @@ export default function App() {
 
   const savePapers = (drafts: PaperDraft[]) => {
     if (drafts.length === 0) return;
-    setData((d) => drafts.reduce(
-      (acc, draft) => upsertSet(
-        acc,
-        createPaperSet(draft.meta.title, draft.markdown, nextDataTimestamp(acc)),
-      ),
-      d,
-    ));
+    setData((d) => drafts.reduce((acc, draft) => {
+      const created = createPaperSet(draft.meta.title, draft.markdown, nextDataTimestamp(acc));
+      if (draft.pdf) void putPdf(created.id, draft.pdf.slice(0));
+      return upsertSet(acc, created);
+    }, d));
     setNotice(`Added ${drafts.length} paper${drafts.length === 1 ? '' : 's'}.`);
   };
 
@@ -374,10 +389,64 @@ export default function App() {
     if (route.view === 'set' && !activeSet) navigate('/papers');
   }, [route, activeSet]);
 
+  useEffect(() => {
+    if (!activeSet) return;
+    const setId = activeSet.id;
+    const pmcid = paperFrontMatter(activeSet.markdown).pmcid;
+    const token = ++pdfToken.current;
+    const controller = new AbortController();
+    setPdfSession({ id: setId, status: 'loading', bytes: null });
+    void (async () => {
+      const local = await getPdf(setId);
+      if (pdfToken.current !== token) return;
+      if (local) {
+        setPdfSession({ id: setId, status: 'ready', bytes: local });
+        return;
+      }
+      if (!pmcid) {
+        setPdfSession({ id: setId, status: 'missing', bytes: null });
+        return;
+      }
+      setPdfSession({ id: setId, status: 'checking', bytes: null });
+      try {
+        const { fetchOpenAccessPdf } = await import('./lib/europepmc');
+        const remote = await fetchOpenAccessPdf(pmcid, controller.signal);
+        if (pdfToken.current !== token) return;
+        if (!remote) {
+          setPdfSession({ id: setId, status: 'missing', bytes: null });
+          return;
+        }
+        await putPdf(setId, remote.slice(0)).catch(() => undefined);
+        if (pdfToken.current !== token) return;
+        setPdfSession({ id: setId, status: 'ready', bytes: remote });
+      } catch {
+        if (pdfToken.current !== token) return;
+        setPdfSession({ id: setId, status: 'missing', bytes: null });
+      }
+    })();
+    return () => controller.abort();
+  }, [activeSet?.id]);
+
+  const attachPdf = async (file: File) => {
+    if (!activeSet) return;
+    const token = ++pdfToken.current;
+    const bytes = await file.arrayBuffer();
+    try {
+      await putPdf(activeSet.id, bytes.slice(0));
+    } catch {
+      /* still show it for this session */
+    }
+    if (pdfToken.current !== token) return;
+    setPdfSession({ id: activeSet.id, status: 'ready', bytes });
+  };
+
+  const pdfBytes = activeSet && pdfSession.id === activeSet.id ? pdfSession.bytes : null;
+  const pdfStatus = activeSet && pdfSession.id === activeSet.id ? pdfSession.status : 'loading';
+
   const themeIcon = data.theme === 'light' ? <Sun size={16} aria-hidden /> : data.theme === 'dark' ? <Moon size={16} aria-hidden /> : <Monitor size={16} aria-hidden />;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${route.view === 'set' ? ' app-shell-reader' : ''}`}>
       <header className="app-header">
         <div className="header-inner">
           <button type="button" className="brand" onClick={() => navigate('/papers')}>
@@ -439,6 +508,9 @@ export default function App() {
             onDelete={() => removeSet(activeSet)}
             onExport={() => exportSet(activeSet)}
             onRefresh={refreshPaper}
+            pdfBytes={pdfBytes}
+            pdfStatus={pdfStatus}
+            onAttachPdf={(file) => void attachPdf(file)}
           />
         ) : (
           <ReviewView

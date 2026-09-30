@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowUpRight,
   Check,
@@ -66,6 +66,25 @@ function DocTable({ block }: { block: TableBlock }) {
   );
 }
 
+function Passage({
+  text,
+  onLocate,
+  className,
+  children,
+}: {
+  text: string;
+  onLocate?: (quote: string) => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  if (!onLocate) return <span className={className}>{children}</span>;
+  return (
+    <button type="button" className={`cite-jump ${className ?? ''}`} onClick={() => onLocate(text)} title="Show this in the paper">
+      {children}
+    </button>
+  );
+}
+
 function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
@@ -88,7 +107,17 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
  * Data — tables, equations, figures, supplements, availability
  * ------------------------------------------------------------------ */
 
-export function DataView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string; setId: string }) {
+export function DataView({
+  doc,
+  pmcid,
+  setId,
+  onLocate,
+}: {
+  doc: ParsedDoc;
+  pmcid?: string;
+  setId: string;
+  onLocate?: (quote: string) => void;
+}) {
   const views = useMemo(() => buildPaperViews(doc, pmcid), [doc, pmcid]);
   const { tables, equations, figures, supplements, availability } = views;
   const empty =
@@ -146,9 +175,11 @@ export function DataView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string
           {tables.map((table, i) => (
             <figure key={i} className="data-figure">
               <figcaption>
-                <strong>{table.label}</strong>
-                {table.caption ? ` ${table.caption}` : ''}
-                <span className="data-section">{table.section}</span>
+                <Passage text={table.caption || table.label} onLocate={onLocate}>
+                  <strong>{table.label}</strong>
+                  {table.caption ? ` ${table.caption}` : ''}
+                  <span className="data-section">{table.section}</span>
+                </Passage>
               </figcaption>
               {table.block ? (
                 <DocTable block={table.block} />
@@ -172,9 +203,11 @@ export function DataView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string
                     text={[table.block.header, ...table.block.rows].map((row) => row.join('\t')).join('\n')}
                   />
                 ) : null}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => jumpToNotes(setId)}>
-                  In context <ArrowUpRight size={13} aria-hidden />
-                </button>
+                {onLocate ? null : (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => jumpToNotes(setId)}>
+                    In context <ArrowUpRight size={13} aria-hidden />
+                  </button>
+                )}
               </div>
             </figure>
           ))}
@@ -191,7 +224,11 @@ export function DataView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string
               <div key={i} className="figure-card">
                 <div className="figure-label">{figure.label}</div>
                 {figure.image ? <PaperImage src={figure.image} alt={figure.label} /> : null}
-                <p className="figure-caption">{figure.caption || 'No caption was published with this figure.'}</p>
+                <p className="figure-caption">
+                  <Passage text={figure.caption || figure.label} onLocate={onLocate}>
+                    {figure.caption || 'No caption was published with this figure.'}
+                  </Passage>
+                </p>
                 <div className="figure-card-foot">
                   <span className="data-section">{figure.section}</span>
                   {!figure.image && (figure.link || pmcid) ? (
@@ -285,7 +322,17 @@ function highlight(text: string, ranges: Array<[number, number]>) {
   return parts;
 }
 
-export function ClaimsView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string; setId: string }) {
+export function ClaimsView({
+  doc,
+  pmcid,
+  setId,
+  onLocate,
+}: {
+  doc: ParsedDoc;
+  pmcid?: string;
+  setId: string;
+  onLocate?: (quote: string) => void;
+}) {
   const views = useMemo(() => buildPaperViews(doc, pmcid), [doc, pmcid]);
   const [filter, setFilter] = useState<'all' | ClaimItem['kind']>('all');
   const claims = views.claims.filter((claim) => filter === 'all' || claim.kind === filter);
@@ -330,12 +377,20 @@ export function ClaimsView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: stri
           const ranges: Array<[number, number]> = at >= 0 ? [[at, at + claim.trigger.length]] : [];
           return (
             <li key={i} className={`claim-card claim-${claim.kind}`}>
-              <p className="claim-text">{highlight(claim.text, ranges)}</p>
+              <p className="claim-text">
+                <Passage text={claim.text} onLocate={onLocate}>
+                  {highlight(claim.text, ranges)}
+                </Passage>
+              </p>
               <div className="claim-foot">
                 <span className={`claim-kind claim-kind-${claim.kind}`}>{claim.kind}</span>
-                <button type="button" className="claim-section" onClick={() => jumpToNotes(setId)}>
-                  {claim.section} <ArrowUpRight size={12} aria-hidden />
-                </button>
+                {onLocate ? (
+                  <span className="claim-section">{claim.section}</span>
+                ) : (
+                  <button type="button" className="claim-section" onClick={() => jumpToNotes(setId)}>
+                    {claim.section} <ArrowUpRight size={12} aria-hidden />
+                  </button>
+                )}
               </div>
             </li>
           );
@@ -349,7 +404,15 @@ export function ClaimsView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: stri
  * Find — search text and numbers
  * ------------------------------------------------------------------ */
 
-export function FindView({ doc, setId }: { doc: ParsedDoc; setId: string }) {
+export function FindView({
+  doc,
+  setId,
+  onLocate,
+}: {
+  doc: ParsedDoc;
+  setId: string;
+  onLocate?: (quote: string) => void;
+}) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'text' | 'numbers'>('text');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -419,10 +482,16 @@ export function FindView({ doc, setId }: { doc: ParsedDoc; setId: string }) {
           {hits.map((hit, i) => (
             <li key={i} className="hit-card">
               <div className="hit-section">{hit.section}</div>
-              <p className="hit-text">{highlight(hit.text, hit.ranges)}</p>
-              <button type="button" className="claim-section" onClick={() => jumpToNotes(setId)}>
-                Open in Notes <ArrowUpRight size={12} aria-hidden />
-              </button>
+              <p className="hit-text">
+                <Passage text={hit.text} onLocate={onLocate}>
+                  {highlight(hit.text, hit.ranges)}
+                </Passage>
+              </p>
+              {onLocate ? null : (
+                <button type="button" className="claim-section" onClick={() => jumpToNotes(setId)}>
+                  Open in Notes <ArrowUpRight size={12} aria-hidden />
+                </button>
+              )}
             </li>
           ))}
         </ol>
@@ -434,7 +503,11 @@ export function FindView({ doc, setId }: { doc: ParsedDoc; setId: string }) {
                 <span className="number-value">{item.value}</span>
                 <span className="hit-section">{item.section}</span>
               </div>
-              <p className="hit-text">{item.text}</p>
+              <p className="hit-text">
+                <Passage text={item.text} onLocate={onLocate}>
+                  {item.text}
+                </Passage>
+              </p>
             </li>
           ))}
         </ol>
@@ -473,9 +546,11 @@ function briefText(brief: PaperBrief): string {
 function SkimSectionCard({
   section,
   onOpen,
+  onLocate,
 }: {
   section: SkimSection;
   onOpen?: (id: string) => void;
+  onLocate?: (quote: string) => void;
 }) {
   const role = ROLE_LABEL[section.role];
   const inner = (
@@ -489,11 +564,21 @@ function SkimSectionCard({
           <span className="skim-words">{section.words} words</span>
         </span>
       </div>
-      {section.gist && <p className="skim-gist">{section.gist}</p>}
+      {section.gist && (
+        <p className="skim-gist">
+          <Passage text={section.gist} onLocate={onLocate}>
+            {section.gist}
+          </Passage>
+        </p>
+      )}
       {section.bullets.length > 0 && (
         <ul className="skim-bullets">
           {section.bullets.map((bullet, i) => (
-            <li key={i}>{bullet}</li>
+            <li key={i}>
+              <Passage text={bullet} onLocate={onLocate}>
+                {bullet}
+              </Passage>
+            </li>
           ))}
         </ul>
       )}
@@ -509,7 +594,7 @@ function SkimSectionCard({
     </>
   );
 
-  if (!onOpen) {
+  if (onLocate || !onOpen) {
     return (
       <div className="skim-card" id={`skim-${section.id}`}>
         {inner}
@@ -533,9 +618,11 @@ function SkimSectionCard({
 export function SkimReport({
   views,
   onOpenSection,
+  onLocate,
 }: {
   views: PaperViews;
   onOpenSection?: (headingId: string) => void;
+  onLocate?: (quote: string) => void;
 }) {
   const sections = views.skim.filter((section) => section.gist || section.numbers.length > 0);
   const { brief } = views;
@@ -566,7 +653,11 @@ export function SkimReport({
                 <div className="skim-slot-label">
                   <Target size={14} aria-hidden /> Asked
                 </div>
-                <p>{brief.asked}</p>
+                <p>
+                  <Passage text={brief.asked} onLocate={onLocate}>
+                    {brief.asked}
+                  </Passage>
+                </p>
               </div>
             )}
             {brief.did && (
@@ -574,7 +665,11 @@ export function SkimReport({
                 <div className="skim-slot-label">
                   <FlaskConical size={14} aria-hidden /> Did
                 </div>
-                <p>{brief.did}</p>
+                <p>
+                  <Passage text={brief.did} onLocate={onLocate}>
+                    {brief.did}
+                  </Passage>
+                </p>
               </div>
             )}
             {brief.found && (
@@ -582,7 +677,11 @@ export function SkimReport({
                 <div className="skim-slot-label">
                   <CircleCheck size={14} aria-hidden /> Found
                 </div>
-                <p>{brief.found}</p>
+                <p>
+                  <Passage text={brief.found} onLocate={onLocate}>
+                    {brief.found}
+                  </Passage>
+                </p>
               </div>
             )}
             {brief.caveat && (
@@ -590,7 +689,11 @@ export function SkimReport({
                 <div className="skim-slot-label">
                   <AlertTriangle size={14} aria-hidden /> Watch for
                 </div>
-                <p>{brief.caveat}</p>
+                <p>
+                  <Passage text={brief.caveat} onLocate={onLocate}>
+                    {brief.caveat}
+                  </Passage>
+                </p>
               </div>
             )}
           </div>
@@ -602,7 +705,11 @@ export function SkimReport({
           <h2 className="pane-title">Headline claims</h2>
           <ul className="skim-claims">
             {topClaims.map((claim, i) => (
-              <li key={i}>{claim.text}</li>
+              <li key={i}>
+                <Passage text={claim.text} onLocate={onLocate}>
+                  {claim.text}
+                </Passage>
+              </li>
             ))}
           </ul>
         </section>
@@ -625,7 +732,8 @@ export function SkimReport({
               <SkimSectionCard
                 key={section.id || `${section.title}-${i}`}
                 section={section}
-                onOpen={onOpenSection}
+                onOpen={onLocate ? undefined : onOpenSection}
+                onLocate={onLocate}
               />
             ))}
           </div>
@@ -650,11 +758,25 @@ export function LiveSkimList({ sections }: { sections: SkimSection[] }) {
   );
 }
 
-export function SkimView({ doc, pmcid, setId }: { doc: ParsedDoc; pmcid?: string; setId: string }) {
+export function SkimView({
+  doc,
+  pmcid,
+  setId,
+  onLocate,
+}: {
+  doc: ParsedDoc;
+  pmcid?: string;
+  setId: string;
+  onLocate?: (quote: string) => void;
+}) {
   const views = useMemo(() => buildPaperViews(doc, pmcid), [doc, pmcid]);
   return (
     <div className="paper-pane fade-in">
-      <SkimReport views={views} onOpenSection={(headingId) => jumpToNotes(setId, headingId)} />
+      <SkimReport
+        views={views}
+        onLocate={onLocate}
+        onOpenSection={onLocate ? undefined : (headingId) => jumpToNotes(setId, headingId)}
+      />
     </div>
   );
 }
