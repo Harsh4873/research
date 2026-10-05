@@ -25,7 +25,7 @@ import { recordBestMatch } from './lib/sync-core';
 import { SetShell } from './components/SetShell';
 import { SyncMenu } from './components/SyncMenu';
 import { ReviewView, type BulkOutcome, type ImportStatus, type PaperDraft } from './components/ReviewView';
-import { createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
+import { appendPaperNote, applyPaperRefresh, createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
 import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
 import { deletePdf, getPdf, putPdf } from './lib/pdf-store';
 
@@ -298,11 +298,17 @@ export default function App() {
       if (wasAbstractOnly === false && !result.fullText) {
         return 'The source only offered the abstract this time, so the saved copy was kept.';
       }
-      if (result.markdown.trim() === set.markdown.trim()) return 'Already up to date — nothing changed.';
+      // Merge inside the updater against the live copy, so notes written while
+      // the request was in flight survive the refresh.
+      let changed = false;
       setData((d) => {
         const current = d.sets.find((candidate) => candidate.id === set.id) ?? set;
-        return upsertSet(d, { ...current, markdown: result.markdown, updatedAt: nextDataTimestamp(d) });
+        const merged = applyPaperRefresh(current.markdown, result.markdown);
+        if (merged.trim() === current.markdown.trim()) return d;
+        changed = true;
+        return upsertSet(d, { ...current, markdown: merged, updatedAt: nextDataTimestamp(d) });
       });
+      if (!changed) return 'Already up to date — nothing changed.';
       if (wasAbstractOnly && result.fullText) return `Full text found. ${result.openAccessNote}`;
       return 'Re-fetched from the source.';
     } catch (error) {
@@ -362,10 +368,11 @@ export default function App() {
   };
 
   const appendNote = (set: StudySet) => (note: string) => {
-    const heading = /(^|\n)## Added notes\s*(\n|$)/i.test(set.markdown) ? '' : '\n\n## Added notes';
-    const markdown = `${set.markdown.trimEnd()}${heading}\n\n${note.trim()}\n`;
+    // Append inside the updater against the live copy, so a note written while
+    // a re-fetch is in flight cannot clobber the refreshed content.
     setData((d) => {
       const current = d.sets.find((candidate) => candidate.id === set.id) ?? set;
+      const markdown = appendPaperNote(current.markdown, note);
       return upsertSet(d, { ...current, markdown, updatedAt: nextDataTimestamp(d) });
     });
     setNotice('Note added. Your study material has been refreshed.');
