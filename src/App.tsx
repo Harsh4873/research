@@ -300,15 +300,12 @@ export default function App() {
       }
       // Merge inside the updater against the live copy, so notes written while
       // the request was in flight survive the refresh.
-      let changed = false;
       setData((d) => {
         const current = d.sets.find((candidate) => candidate.id === set.id) ?? set;
         const merged = applyPaperRefresh(current.markdown, result.markdown);
         if (merged.trim() === current.markdown.trim()) return d;
-        changed = true;
         return upsertSet(d, { ...current, markdown: merged, updatedAt: nextDataTimestamp(d) });
       });
-      if (!changed) return 'Already up to date — nothing changed.';
       if (wasAbstractOnly && result.fullText) return `Full text found. ${result.openAccessNote}`;
       return 'Re-fetched from the source.';
     } catch (error) {
