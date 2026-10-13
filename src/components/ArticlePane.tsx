@@ -2,8 +2,11 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { FileUp } from 'lucide-react';
 import type { Block, ListBlock, ParsedDoc } from '../model';
 import { findQuotePage } from '../lib/locate-quote';
+import { scrollInPane } from '../lib/scroll';
 import { InlineRuns } from './Inline';
 import type { LocateRequest } from './PdfPane';
+
+export type PdfLoadStatus = 'loading' | 'checking' | 'ready' | 'missing' | 'error';
 
 function listText(list: ListBlock): string {
   return list.items
@@ -108,11 +111,13 @@ export function ArticlePane({
   locate,
   status,
   onFile,
+  onRetry,
 }: {
   doc: ParsedDoc;
   locate: LocateRequest | null;
-  status: 'loading' | 'checking' | 'ready' | 'missing';
+  status: PdfLoadStatus;
   onFile: (file: File) => void;
+  onRetry?: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -128,7 +133,7 @@ export function ArticlePane({
     const index = findQuotePage(texts, locate.text);
     blocks.forEach((element, blockIndex) => element.classList.toggle('source-hit', blockIndex === index));
     setMiss(index < 0);
-    if (index >= 0) blocks[index]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (index >= 0 && blocks[index]) scrollInPane(blocks[index], 'center');
   }, [locate]);
 
   const take = (file: File | undefined) => {
@@ -156,11 +161,33 @@ export function ArticlePane({
       <div className="article-attach">
         <FileUp size={16} aria-hidden />
         <span>
-          {status === 'checking' ? 'Looking for an open-access PDF… ' : 'No PDF on this device yet. '}
-          <button type="button" className="link-btn" onClick={() => inputRef.current?.click()}>
-            Add the PDF
-          </button>{' '}
-          to scroll the original. Citations still jump in this text.
+          {status === 'ready' ? (
+            'A PDF is on this device. Switch to PDF to scroll the original. Citations still jump in this text.'
+          ) : status === 'error' ? (
+            <>
+              The PDF could not be downloaded.{' '}
+              {onRetry && (
+                <button type="button" className="link-btn" onClick={onRetry}>
+                  Try again
+                </button>
+              )}{' '}
+              or{' '}
+              <button type="button" className="link-btn" onClick={() => inputRef.current?.click()}>
+                add a PDF
+              </button>
+              . You can keep reading this text.
+            </>
+          ) : status === 'checking' || status === 'loading' ? (
+            'Looking for an open-access PDF. You can read this text while that finishes.'
+          ) : (
+            <>
+              No PDF on this device yet.{' '}
+              <button type="button" className="link-btn" onClick={() => inputRef.current?.click()}>
+                Add the PDF
+              </button>{' '}
+              to scroll the original. Citations still jump in this text.
+            </>
+          )}
         </span>
         <input
           ref={inputRef}

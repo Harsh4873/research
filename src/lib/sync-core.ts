@@ -276,6 +276,20 @@ export function planPush(data: AppData, index: RemoteIndex): PushPlan {
   return plan;
 }
 
+/** Name the papers left on this device because their markdown exceeds the remote cap. */
+export function describeOversizedSets(titles: string[]): string {
+  const names = titles.map((title) => title.trim() || 'Untitled paper');
+  const limit = 'over ~600 KB of markdown';
+  if (names.length <= 1) {
+    const name = names[0] ?? 'A paper';
+    return `“${name}” is too large to sync (${limit}). It stays on this device.`;
+  }
+  const shown = names.slice(0, 4);
+  const list = shown.map((name) => `“${name}”`).join(', ');
+  const more = names.length > shown.length ? ` and ${names.length - shown.length} more` : '';
+  return `${names.length} papers are too large to sync (${limit}): ${list}${more}. They stay on this device.`;
+}
+
 export function setToRemote(set: StudySet): RemoteSet {
   return {
     id: set.id,

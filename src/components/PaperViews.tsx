@@ -31,22 +31,22 @@ import {
 } from '../lib/paper-view';
 import { briefIsEmpty } from '../lib/paper-skim';
 import { copyText } from '../lib/clipboard';
-import { PaperImage } from './Inline';
+import { scrollInPane } from '../lib/scroll';
+import { NewTabLink, PaperImage } from './Inline';
 
 function jumpToNotes(setId: string, headingId?: string) {
   window.location.hash = `/set/${setId}/notes`;
   if (!headingId) return;
   window.setTimeout(() => {
-    document.getElementById(`h-${headingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const el = document.getElementById(`h-${headingId}`);
+    if (el) scrollInPane(el, 'start');
   }, 120);
 }
 
 /** Scroll a section that is already on this page. Hash URLs are the router. */
 function scrollToId(id: string) {
   const node = document.getElementById(id);
-  if (!node) return;
-  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  node.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  if (node) scrollInPane(node, 'start');
 }
 
 function DocTable({ block }: { block: TableBlock }) {
@@ -94,19 +94,19 @@ function Passage({
 }
 
 function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false);
+  const [note, setNote] = useState<'copied' | 'failed' | null>(null);
   return (
     <button
       type="button"
-      className={`btn btn-sm ${done ? 'btn-success' : 'btn-ghost'}`}
+      className={`btn btn-sm ${note === 'copied' ? 'btn-success' : 'btn-ghost'}`}
       onClick={async () => {
-        if (await copyText(text)) {
-          setDone(true);
-          window.setTimeout(() => setDone(false), 1600);
-        }
+        const ok = await copyText(text);
+        setNote(ok ? 'copied' : 'failed');
+        window.setTimeout(() => setNote(null), 2200);
       }}
     >
-      {done ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />} {done ? 'Copied' : label}
+      {note === 'copied' ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}{' '}
+      {note === 'copied' ? 'Copied' : note === 'failed' ? 'Could not copy' : label}
     </button>
   );
 }
@@ -170,9 +170,9 @@ export function DataView({
                 <div className="supp-head">
                   <span className="supp-name">{item.name}</span>
                   {item.href ? (
-                    <a className="btn btn-sm" href={item.href} target="_blank" rel="noreferrer noopener">
+                    <NewTabLink className="btn btn-sm" href={item.href}>
                       Open <ExternalLink size={13} aria-hidden />
-                    </a>
+                    </NewTabLink>
                   ) : (
                     item.file && <span className="meta-chip">{item.file}</span>
                   )}
@@ -207,9 +207,9 @@ export function DataView({
                   {table.link ? (
                     <>
                       {' '}
-                      <a href={table.link} target="_blank" rel="noreferrer noopener">
+                      <NewTabLink href={table.link}>
                         Read it in the article <ExternalLink size={12} aria-hidden />
-                      </a>
+                      </NewTabLink>
                     </>
                   ) : null}
                 </p>
@@ -250,13 +250,9 @@ export function DataView({
                 <div className="figure-card-foot">
                   <span className="data-section">{figure.section}</span>
                   {!figure.image && (figure.link || pmcid) ? (
-                    <a
-                      href={figure.link ?? `https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                    >
+                    <NewTabLink href={figure.link ?? `https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`}>
                       View <ExternalLink size={12} aria-hidden />
-                    </a>
+                    </NewTabLink>
                   ) : null}
                 </div>
               </div>
@@ -265,9 +261,9 @@ export function DataView({
           {pmcid && figures.every((figure) => !figure.image) && (
             <p className="pane-note">
               This article's artwork is not published with its machine-readable text.{' '}
-              <a href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`} target="_blank" rel="noreferrer noopener">
+              <NewTabLink href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`}>
                 View the figures in the article <ExternalLink size={12} aria-hidden />
-              </a>
+              </NewTabLink>
             </p>
           )}
         </section>

@@ -19,6 +19,7 @@ import { normalizeKey } from '../lib/extract';
 import { useSpeechInput } from '../lib/speech';
 import { speakableSegments, useReadAloud } from '../lib/readaloud';
 import { copyText } from '../lib/clipboard';
+import { scrollInPane } from '../lib/scroll';
 import { InlineRuns } from './Inline';
 
 const READING_RATES = [0.75, 1, 1.25, 1.5];
@@ -37,15 +38,20 @@ export function NotesView({ material, markdown, onAddNote }: NotesViewProps) {
   const reader = useReadAloud(segments);
   const activeHeading = useScrollSpy(outline.map((o) => o.id));
 
-  // Follow along: keep the sentence being read comfortably in view.
+  // Follow along inside the notes column. The window itself does not scroll.
   useEffect(() => {
     if (reader.status !== 'playing' || reader.activeBlock < 0) return;
     const el = document.getElementById(`b-${reader.activeBlock}`);
     if (!el) return;
-    const rect = el.getBoundingClientRect();
-    if (rect.top < 80 || rect.bottom > window.innerHeight - 40) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const root = el.closest('.reader-body');
+    if (root instanceof HTMLElement) {
+      const rect = el.getBoundingClientRect();
+      const box = root.getBoundingClientRect();
+      if (rect.top < box.top + 24 || rect.bottom > box.bottom - 24) scrollInPane(el, 'center');
+      return;
     }
+    const rect = el.getBoundingClientRect();
+    if (rect.top < 80 || rect.bottom > window.innerHeight - 40) scrollInPane(el, 'center');
   }, [reader.activeBlock, reader.status]);
 
   return (
@@ -59,7 +65,10 @@ export function NotesView({ material, markdown, onAddNote }: NotesViewProps) {
               type="button"
               className={`outline-link ${activeHeading === node.id ? 'outline-link-active' : ''}`}
               data-depth={node.depth}
-              onClick={() => document.getElementById(`h-${node.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              onClick={() => {
+                const el = document.getElementById(`h-${node.id}`);
+                if (el) scrollInPane(el, 'start');
+              }}
             >
               {node.title}
             </button>
@@ -120,14 +129,13 @@ function ReadingToolbar({
   markdown: string;
   hasSegments: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copyNote, setCopyNote] = useState<'copied' | 'failed' | null>(null);
   const active = reader.status !== 'idle';
 
   const copy = async () => {
     const ok = await copyText(markdown);
-    if (!ok) return;
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    setCopyNote(ok ? 'copied' : 'failed');
+    window.setTimeout(() => setCopyNote(null), 2200);
   };
 
   return (
@@ -174,10 +182,14 @@ function ReadingToolbar({
         )}
       </div>
 
-      <button type="button" className={`btn btn-sm ${copied ? 'btn-success' : ''}`} onClick={copy}>
-        {copied ? (
+      <button type="button" className={`btn btn-sm ${copyNote === 'copied' ? 'btn-success' : ''}`} onClick={copy}>
+        {copyNote === 'copied' ? (
           <>
             <Check size={15} aria-hidden /> Copied
+          </>
+        ) : copyNote === 'failed' ? (
+          <>
+            <Copy size={15} aria-hidden /> Could not copy
           </>
         ) : (
           <>
@@ -203,6 +215,8 @@ function useScrollSpy(ids: string[]): string | null {
   useEffect(() => {
     if (ids.length === 0 || typeof IntersectionObserver === 'undefined') return;
     const visible = new Map<string, number>();
+    const rootEl = document.querySelector('.reader-body');
+    const root = rootEl instanceof HTMLElement ? rootEl : null;
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -215,7 +229,7 @@ function useScrollSpy(ids: string[]): string | null {
           setActive(top);
         }
       },
-      { rootMargin: '-72px 0px -70% 0px', threshold: 0 },
+      { root, rootMargin: root ? '0px 0px -55% 0px' : '-72px 0px -70% 0px', threshold: 0 },
     );
     for (const id of ids) {
       const el = document.getElementById(`h-${id}`);

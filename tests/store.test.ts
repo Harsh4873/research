@@ -6,6 +6,7 @@ import {
   exportSetJson,
   getProgress,
   hasAccountData,
+  libraryUnreadable,
   loadAccountData,
   loadData,
   loadOrAdoptOwnerVaultData,
@@ -72,6 +73,38 @@ describe('persistence round-trip', () => {
     const loaded = loadData(storage);
     expect(loaded.sets).toEqual([]);
     expect(loaded.theme).toBe('auto');
+  });
+
+  it('leaves an unreadable library in place instead of treating it as empty', () => {
+    const storage = memoryStorage();
+    storage.setItem('recall.data.v1', '{not json');
+    expect(libraryUnreadable(null, storage)).toBe(true);
+    expect(loadData(storage).sets).toEqual([]);
+    expect(storage.getItem('recall.data.v1')).toBe('{not json');
+    expect(libraryUnreadable('uid', storage)).toBe(false);
+  });
+
+  it('does not copy an unreadable account cache into the shared vault', () => {
+    const storage = memoryStorage();
+    storage.setItem('recall.data.v1.account.legacy-uid', '{not json');
+    const adopted = loadOrAdoptOwnerVaultData(
+      'shared-vault',
+      'legacy-uid',
+      'other-uid',
+      defaultData(),
+      storage,
+    );
+    expect(adopted.sets).toEqual([]);
+    expect(hasAccountData('shared-vault', storage)).toBe(false);
+    expect(storage.getItem('recall.data.v1.account.legacy-uid')).toBe('{not json');
+  });
+
+  it('does not copy an unreadable signed-out library into the vault', () => {
+    const storage = memoryStorage();
+    storage.setItem('recall.data.v1', '{not json');
+    loadOrAdoptOwnerVaultData('shared-vault', 'owner-uid', null, defaultData(), storage);
+    expect(hasAccountData('shared-vault', storage)).toBe(false);
+    expect(storage.getItem('recall.data.v1')).toBe('{not json');
   });
 
   it('keeps browser-local libraries isolated by account UID', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StudySet } from '../src/model';
-import { findExistingPaper, searchPapers } from '../src/lib/paper-search';
+import { findExistingPaper, paperRecords, searchPapers } from '../src/lib/paper-search';
 
 function paper(id: string, front: Record<string, string>, body = 'Body text about the topic.'): StudySet {
   const matter = Object.entries(front)
@@ -127,6 +127,13 @@ describe('searchPapers', () => {
   it('is case and punctuation tolerant', () => {
     expect(searchPapers(LIBRARY, 'RIVERA').map((m) => m.set.id)).toEqual(['paper-a']);
     expect(searchPapers(LIBRARY, 'pmc6822721').map((m) => m.set.id)).toEqual(['paper-b']);
+  });
+
+  it('reuses folded records until the library array changes', () => {
+    const first = paperRecords(LIBRARY);
+    expect(paperRecords(LIBRARY)).toBe(first);
+    expect(searchPapers(LIBRARY, 'rivera')[0].set.id).toBe('paper-a');
+    expect(paperRecords([...LIBRARY])).not.toBe(first);
   });
 });
 

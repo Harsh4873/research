@@ -24,6 +24,7 @@ import {
   describeAuthError,
   describeSyncError,
   emptyRemoteIndex,
+  describeOversizedSets,
   planPush,
   progressToRemote,
   setToRemote,
@@ -272,6 +273,12 @@ class CloudEngine {
     this.pushTimer = setTimeout(() => void this.flush(), wait);
   }
 
+  /** Name every paper the size cap left on this device, including when other sets did sync. */
+  private reportOversized(ids: string[], email?: string) {
+    const titles = ids.map((id) => this.latest?.sets.find((set) => set.id === id)?.title?.trim() || 'Untitled paper');
+    this.setStatus({ state: 'error', email, error: describeOversizedSets(titles) });
+  }
+
   /** Everything local is in the cloud: drop the backoff and any stale error. */
   private settle(email?: string) {
     this.writeFailures = 0;
@@ -291,11 +298,7 @@ class CloudEngine {
     const plan = planPush(this.latest, this.index);
     if (plan.sets.length === 0 && plan.tombstones.length === 0 && plan.progress.length === 0) {
       if (plan.oversized.length > 0) {
-        this.setStatus({
-          state: 'error',
-          email: user.email ?? undefined,
-          error: 'One set is too large to sync (over ~600 KB of markdown). It stays local-only.',
-        });
+        this.reportOversized(plan.oversized, user.email ?? undefined);
         return;
       }
       this.settle(user.email ?? undefined);
@@ -326,7 +329,8 @@ class CloudEngine {
       }
       await Promise.all(writes);
       this.pushing = false;
-      this.settle(user.email ?? undefined);
+      if (plan.oversized.length > 0) this.reportOversized(plan.oversized, user.email ?? undefined);
+      else this.settle(user.email ?? undefined);
       // Re-check in case more changes landed while writing.
       this.schedulePush();
     } catch (error) {

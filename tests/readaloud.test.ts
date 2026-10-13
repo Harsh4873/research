@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseMarkdown } from '../src/lib/markdown';
-import { speakableSegments, splitSentences } from '../src/lib/readaloud';
+import { queueSpeakAfterCancel, SPEAK_AFTER_CANCEL_MS, speakableSegments, splitSentences } from '../src/lib/readaloud';
 
 describe('splitSentences', () => {
   it('splits on sentence boundaries and collapses whitespace', () => {
@@ -22,6 +22,25 @@ describe('splitSentences', () => {
 
   it('returns nothing for empty input', () => {
     expect(splitSentences('   ')).toEqual([]);
+  });
+});
+
+describe('queueSpeakAfterCancel', () => {
+  it('schedules speak after cancel instead of calling it in the same turn', () => {
+    const calls: string[] = [];
+    const queued: Array<() => void> = [];
+    queueSpeakAfterCancel(
+      () => calls.push('cancel'),
+      () => calls.push('speak'),
+      (fn, ms) => {
+        calls.push(`wait ${ms}`);
+        queued.push(fn);
+      },
+    );
+    expect(calls).toEqual(['cancel', `wait ${SPEAK_AFTER_CANCEL_MS}`]);
+    expect(queued).toHaveLength(1);
+    queued[0]();
+    expect(calls).toEqual(['cancel', `wait ${SPEAK_AFTER_CANCEL_MS}`, 'speak']);
   });
 });
 

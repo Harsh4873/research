@@ -105,6 +105,24 @@ export function speechSupported(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
 }
 
+/**
+ * Chromium drops a speak() call that happens in the same turn as cancel().
+ * Callers must cancel first, then run speak from the scheduled callback.
+ */
+export const SPEAK_AFTER_CANCEL_MS = 60;
+
+/** Nudge a long utterance. Chromium pauses synthesis on its own after several seconds. */
+export const SPEAK_RESUME_INTERVAL_MS = 10_000;
+
+export function queueSpeakAfterCancel(
+  cancel: () => void,
+  speak: () => void,
+  schedule: (fn: () => void, ms: number) => void,
+): void {
+  cancel();
+  schedule(speak, SPEAK_AFTER_CANCEL_MS);
+}
+
 export type ReadStatus = 'idle' | 'playing' | 'paused';
 
 export interface ReadAloudControls {
@@ -151,6 +169,8 @@ export function useReadAloud(segments: SpeechSegment[]): ReadAloudControls {
   const statusRef = useRef<ReadStatus>('idle');
   const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const guardRef = useRef(0);
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepAliveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   segmentsRef.current = segments;
   rateRef.current = rate;
@@ -171,9 +191,33 @@ export function useReadAloud(segments: SpeechSegment[]): ReadAloudControls {
     setPointer(index);
   }, []);
 
+  const clearTimers = useCallback(() => {
+    if (pendingTimer.current !== null) {
+      clearTimeout(pendingTimer.current);
+      pendingTimer.current = null;
+    }
+    if (keepAliveTimer.current !== null) {
+      clearInterval(keepAliveTimer.current);
+      keepAliveTimer.current = null;
+    }
+  }, []);
+
   const hardStop = useCallback(() => {
     guardRef.current += 1; // invalidate any in-flight utterance callbacks
+    clearTimers();
     if (supported) window.speechSynthesis.cancel();
+  }, [supported, clearTimers]);
+
+  const startKeepAlive = useCallback(() => {
+    if (!supported || keepAliveTimer.current !== null) return;
+    keepAliveTimer.current = setInterval(() => {
+      if (statusRef.current !== 'playing') return;
+      try {
+        window.speechSynthesis.resume();
+      } catch {
+        /* resume is only a nudge for engines that stall */
+      }
+    }, SPEAK_RESUME_INTERVAL_MS);
   }, [supported]);
 
   const speakFrom = useCallback(
@@ -181,19 +225,20 @@ export function useReadAloud(segments: SpeechSegment[]): ReadAloudControls {
       if (!supported) return;
       const all = segmentsRef.current;
       if (startIndex >= all.length) {
+        hardStop();
         setStatus('idle');
         statusRef.current = 'idle';
         setActive(-1);
         return;
       }
-      hardStop();
-      const token = guardRef.current;
       setStatus('playing');
       statusRef.current = 'playing';
 
+      let token = 0;
       const speakAt = (index: number) => {
         if (token !== guardRef.current) return;
         if (index >= segmentsRef.current.length) {
+          clearTimers();
           setStatus('idle');
           statusRef.current = 'idle';
           setActive(-1);
@@ -212,16 +257,37 @@ export function useReadAloud(segments: SpeechSegment[]): ReadAloudControls {
           if (token !== guardRef.current) return;
           speakAt(index + 1);
         };
-        utterance.onerror = () => {
+        utterance.onerror = (event) => {
           if (token !== guardRef.current) return;
+          const reason = (event as SpeechSynthesisErrorEvent).error;
+          // cancel() reports these. They are not a failed sentence.
+          if (reason === 'canceled' || reason === 'interrupted') return;
           speakAt(index + 1);
         };
         window.speechSynthesis.speak(utterance);
       };
 
-      speakAt(startIndex);
+      queueSpeakAfterCancel(
+        () => {
+          guardRef.current += 1;
+          token = guardRef.current;
+          clearTimers();
+          window.speechSynthesis.cancel();
+        },
+        () => {
+          if (token !== guardRef.current) return;
+          startKeepAlive();
+          speakAt(startIndex);
+        },
+        (fn, ms) => {
+          pendingTimer.current = setTimeout(() => {
+            pendingTimer.current = null;
+            fn();
+          }, ms);
+        },
+      );
     },
-    [supported, hardStop, setActive],
+    [supported, hardStop, setActive, clearTimers, startKeepAlive],
   );
 
   const stop = useCallback(() => {
@@ -234,17 +300,19 @@ export function useReadAloud(segments: SpeechSegment[]): ReadAloudControls {
   const toggle = useCallback(() => {
     if (!supported || segmentsRef.current.length === 0) return;
     if (statusRef.current === 'playing') {
-      window.speechSynthesis.pause();
+      // pause() and resume() are ignored on iOS, so pause by cancelling and remembering the sentence.
+      const index = Math.max(0, pointerRef.current);
+      hardStop();
+      pointerRef.current = index;
+      setPointer(index);
       setStatus('paused');
       statusRef.current = 'paused';
     } else if (statusRef.current === 'paused') {
-      window.speechSynthesis.resume();
-      setStatus('playing');
-      statusRef.current = 'playing';
+      speakFrom(Math.max(0, pointerRef.current));
     } else {
       speakFrom(0);
     }
-  }, [supported, speakFrom]);
+  }, [supported, speakFrom, hardStop]);
 
   const setRate = useCallback(
     (next: number) => {

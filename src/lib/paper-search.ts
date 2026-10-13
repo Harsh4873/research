@@ -118,6 +118,17 @@ function surnames(authors: string): string[] {
     .filter((name) => name.length > 1);
 }
 
+const recordCache = new WeakMap<StudySet[], PaperRecord[]>();
+
+/** Folded search records for this library array. Reused until `sets` is a new array. */
+export function paperRecords(sets: StudySet[]): PaperRecord[] {
+  const cached = recordCache.get(sets);
+  if (cached) return cached;
+  const records = sets.filter((set) => isPaperSet(set.id)).map(paperRecord);
+  recordCache.set(sets, records);
+  return records;
+}
+
 function snippetAround(body: string, token: string): string | undefined {
   const at = body.indexOf(token);
   if (at < 0) return undefined;
@@ -136,9 +147,8 @@ function snippetAround(body: string, token: string): string | undefined {
  * narrow rather than widen; where a token matched decides the ranking.
  */
 export function searchPapers(sets: StudySet[], query: string): PaperMatch[] {
-  const papers = sets.filter((set) => isPaperSet(set.id));
   const tokens = tokenize(query);
-  const records = papers.map(paperRecord);
+  const records = paperRecords(sets);
 
   if (tokens.length === 0) {
     return records.map((record) => ({ set: record.set, front: record.front, score: 0, fields: [] }));

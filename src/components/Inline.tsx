@@ -3,6 +3,26 @@ import { ImageOff } from 'lucide-react';
 import type { Inline } from '../model';
 import { normalizeKey } from '../lib/extract';
 
+/** A link that leaves the app. The extra words are for the accessible name only. */
+export function NewTabLink({
+  href,
+  className,
+  title,
+  children,
+}: {
+  href: string;
+  className?: string;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <a className={className} href={href} target="_blank" rel="noreferrer noopener" title={title}>
+      {children}
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
+  );
+}
+
 interface InlineRunsProps {
   runs: Inline[];
   /** Normalized keys of known terms; matching bold runs get highlighted. */
@@ -37,9 +57,9 @@ export function autoLink(text: string, keyPrefix: string): ReactNode[] {
     const trailing = match[0].match(/[.,;]+$/)?.[0] ?? '';
     const label = trailing ? match[0].slice(0, -trailing.length) : match[0];
     out.push(
-      <a key={`${keyPrefix}-${match.index}`} href={href} target="_blank" rel="noreferrer noopener">
+      <NewTabLink key={`${keyPrefix}-${match.index}`} href={href}>
         {label}
-      </a>,
+      </NewTabLink>,
     );
     if (trailing) out.push(trailing);
     last = match.index + match[0].length;
@@ -62,18 +82,18 @@ export function PaperImage({ src, alt }: { src: string; alt: string }) {
     return (
       <span className="figure-fallback">
         <ImageOff size={15} aria-hidden />
-        <a href={src} target="_blank" rel="noreferrer noopener">
-          {alt ? `${alt} — open the image` : 'Open the image'}
-        </a>
+        <NewTabLink href={src}>
+          {alt ? `${alt}: open the image` : 'Open the image'}
+        </NewTabLink>
       </span>
     );
   }
 
   return (
     <span className="figure-wrap" data-loaded={loaded}>
-      <a href={src} target="_blank" rel="noreferrer noopener" title="Open the full-size image">
+      <NewTabLink href={src} title="Open the full-size image">
         <img src={src} alt={alt} loading="lazy" onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
-      </a>
+      </NewTabLink>
     </span>
   );
 }
@@ -97,9 +117,9 @@ export function InlineRuns({ runs, termKeys }: InlineRunsProps) {
             return <code key={i}>{run.text}</code>;
           case 'link':
             return (
-              <a key={i} href={run.href} target="_blank" rel="noreferrer noopener">
+              <NewTabLink key={i} href={run.href}>
                 {run.text}
-              </a>
+              </NewTabLink>
             );
           case 'image':
             return <PaperImage key={i} src={run.href} alt={run.text} />;

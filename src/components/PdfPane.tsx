@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { findItemSpan, findQuotePage, pageText } from '../lib/locate-quote';
+import { scrollInPane } from '../lib/scroll';
 
 type PdfjsApi = {
   getDocument: (src: { data: ArrayBuffer; useSystemFonts?: boolean }) => { promise: Promise<PDFDocumentProxy> };
@@ -115,7 +116,7 @@ export function PdfPane({ bytes, locate }: PdfPaneProps) {
     if (pageIndex < 0) return;
     const scroller = scrollerRef.current;
     const page = scroller?.querySelector<HTMLElement>(`[data-page="${pageIndex + 1}"]`);
-    page?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (page) scrollInPane(page, 'start');
   }, [locate, pageTexts, pageIndex]);
 
   if (error) {
@@ -276,7 +277,8 @@ function PdfPage({
 
   useEffect(() => {
     if (!span) return;
-    wrapRef.current?.querySelector('.pdf-mark')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const mark = wrapRef.current?.querySelector('.pdf-mark');
+    if (mark instanceof HTMLElement) scrollInPane(mark, 'center');
   }, [span, locateId]);
 
   return (

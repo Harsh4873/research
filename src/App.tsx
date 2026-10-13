@@ -8,6 +8,8 @@ import {
   deleteSet,
   exportSetJson,
   getProgress,
+  hasAccountData,
+  libraryUnreadable,
   loadAccountData,
   loadData,
   loadOrAdoptOwnerVaultData,
@@ -28,15 +30,20 @@ import { ReviewView, type BulkOutcome, type ImportStatus, type PaperDraft } from
 import { appendPaperNote, applyPaperRefresh, createPaperSet, isPaperSet, paperFrontMatter, paperIdentity } from './lib/paper-set';
 import { parsePaperId, parsePaperIds, describePaperId } from './lib/paper-id';
 import { deletePdf, getPdf, putPdf } from './lib/pdf-store';
+import { delay } from './lib/delay';
 
 /** A reference list can be long; keep one paste from running away. */
 const MAX_BULK_LOOKUPS = 120;
+/** NCBI asks clients to stay under a few requests a second. */
+const BULK_LOOKUP_GAP_MS = 400;
 
 const SYNC_FLAG_KEY = 'recall.sync.on';
 const LIBRARY_SAVE_WARNING =
   'Could not save the library in this browser. It is still open in this tab, but a reload may bring back an older copy.';
 const PDF_SAVE_WARNING =
   'Could not store the PDF on this device. The paper text is still available.';
+const LIBRARY_UNREADABLE_WARNING =
+  'The saved library in this browser could not be read, so it was left untouched. This tab will not write over it.';
 
 function syncFlag(): boolean {
   try {
@@ -76,7 +83,9 @@ function navigate(hash: string) {
 }
 
 export default function App() {
+  const baseTitle = useRef(typeof document === 'undefined' ? '' : document.title);
   const activeAccountRef = useRef<string | null>(readActiveAccountId());
+  const preserveUnreadable = useRef(libraryUnreadable(activeAccountRef.current));
   const [data, setData] = useState<AppData>(() => (
     activeAccountRef.current ? loadAccountData(activeAccountRef.current) : loadData()
   ));
@@ -84,14 +93,17 @@ export default function App() {
   dataRef.current = data;
   const [route, setRoute] = useState<Route>(parseHash);
   const [notice, setNotice] = useState<string | null>(null);
-  const [libraryWarning, setLibraryWarning] = useState(false);
+  const [libraryWarning, setLibraryWarning] = useState<string | null>(() =>
+    preserveUnreadable.current ? LIBRARY_UNREADABLE_WARNING : null,
+  );
   const [pdfWarning, setPdfWarning] = useState(false);
   const libraryFailKey = useRef<string | null>(null);
   const pdfInflight = useRef(0);
   const pdfFailed = useRef(0);
+  const [pdfNonce, setPdfNonce] = useState(0);
   const [pdfSession, setPdfSession] = useState<{
     id: string;
-    status: 'loading' | 'checking' | 'ready' | 'missing';
+    status: 'loading' | 'checking' | 'ready' | 'missing' | 'error';
     bytes: ArrayBuffer | null;
   }>({ id: '', status: 'missing', bytes: null });
   const pdfToken = useRef(0);
@@ -99,16 +111,20 @@ export default function App() {
   const cloudRef = useRef<CloudEngine | null>(null);
 
   const noteLibrarySave = (uid: string | null, saved: boolean) => {
+    if (preserveUnreadable.current) {
+      setLibraryWarning(LIBRARY_UNREADABLE_WARNING);
+      return;
+    }
     const key = uid ?? '';
     if (!saved) {
       libraryFailKey.current = key;
-      setLibraryWarning(true);
+      setLibraryWarning(LIBRARY_SAVE_WARNING);
       return;
     }
     // A later save of a different account must not hide a failure to write the previous one.
     if (libraryFailKey.current !== null && libraryFailKey.current !== key) return;
     libraryFailKey.current = null;
-    setLibraryWarning(false);
+    setLibraryWarning(null);
   };
 
   const finishPdf = (ok: boolean) => {
@@ -146,7 +162,8 @@ export default function App() {
         const previousUid = activeAccountRef.current;
         if (previousUid === vaultId) return dataRef.current;
 
-        if (previousUid && !saveAccountData(previousUid, dataRef.current)) {
+        const localUnreadable = previousUid ? libraryUnreadable(previousUid) : libraryUnreadable(null);
+        if (previousUid && !localUnreadable && !saveAccountData(previousUid, dataRef.current)) {
           noteLibrarySave(previousUid, false);
         }
 
@@ -157,6 +174,8 @@ export default function App() {
           dataRef.current,
         );
         activeAccountRef.current = vaultId;
+        // A missing vault must not be created from the empty stand-in of an unreadable cache.
+        preserveUnreadable.current = libraryUnreadable(vaultId) || (localUnreadable && !hasAccountData(vaultId));
         writeActiveAccountId(vaultId);
         dataRef.current = next;
         setData(next);
@@ -205,6 +224,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (preserveUnreadable.current) {
+      setLibraryWarning(LIBRARY_UNREADABLE_WARNING);
+      return;
+    }
     const uid = activeAccountRef.current;
     const saved = uid ? saveAccountData(uid, data) : saveData(data);
     noteLibrarySave(uid, saved);
@@ -251,7 +274,11 @@ export default function App() {
   };
 
   const removeSet = (set: StudySet) => {
-    if (!window.confirm(`Remove “${set.title}” and its progress? This also removes it from synced devices.`)) return;
+    const synced = syncFlag() || syncStatus.state !== 'off';
+    const where = synced
+      ? 'This also removes it from synced devices.'
+      : 'Sync is off, so this only removes it from this browser.';
+    if (!window.confirm(`Remove “${set.title}” and its progress? ${where}`)) return;
     void deletePdf(set.id);
     setData((d) => deleteSet(d, set.id, nextDataTimestamp(d)));
     if (route.view === 'set' && route.setId === set.id) navigate('/papers');
@@ -288,27 +315,49 @@ export default function App() {
   };
 
   /** Review: resolve a whole reference list, one paper at a time. */
-  const lookupPapers = async (text: string, onStatus: ImportStatus): Promise<BulkOutcome> => {
+  const lookupPapers = async (text: string, onStatus: ImportStatus, signal?: AbortSignal): Promise<BulkOutcome> => {
     const found = parsePaperIds(text);
     const ids = found.slice(0, MAX_BULK_LOOKUPS);
     const { lookupPaper: lookup } = await import('./lib/europepmc');
     const drafts: PaperDraft[] = [];
     const failures: BulkOutcome['failures'] = [];
     const seen = new Set(data.sets.filter((s) => isPaperSet(s.id)).map((s) => paperIdentity(paperFrontMatter(s.markdown))));
+    const stopped = { label: 'Stopped', message: 'The rest of the list was not fetched.' };
 
     for (const [index, id] of ids.entries()) {
-      onStatus(`Fetching ${index + 1} of ${ids.length} — ${describePaperId(id)}…`);
+      if (signal?.aborted) {
+        failures.push(stopped);
+        break;
+      }
+      if (index > 0) {
+        try {
+          await delay(BULK_LOOKUP_GAP_MS, signal);
+        } catch (error) {
+          if ((error as Error)?.name === 'AbortError') {
+            failures.push(stopped);
+            break;
+          }
+          throw error;
+        }
+      }
+      onStatus(`Fetching ${index + 1} of ${ids.length}: ${describePaperId(id)}…`);
       try {
-        const result = await lookup(id);
+        const result = await lookup(id, signal);
         const identity = paperIdentity(result.meta);
         if (seen.has(identity)) continue;
         seen.add(identity);
         drafts.push({ ...result, note: result.openAccessNote });
       } catch (error) {
-        failures.push({ label: describePaperId(id), message: (error as Error)?.message ?? 'Lookup failed.' });
+        if (signal?.aborted || (error as Error)?.name === 'AbortError') {
+          failures.push(stopped);
+          break;
+        }
+        const err = error as { message?: string; hint?: string };
+        const message = [err?.message || 'Lookup failed.', err?.hint].filter(Boolean).join(' ');
+        failures.push({ label: describePaperId(id), message });
       }
     }
-    if (found.length > ids.length) {
+    if (found.length > ids.length && !signal?.aborted) {
       failures.push({
         label: `${found.length - ids.length} more identifiers`,
         message: `Only the first ${MAX_BULK_LOOKUPS} were fetched.`,
@@ -445,16 +494,26 @@ export default function App() {
     : undefined;
 
   useEffect(() => {
+    document.title = activeSet?.title ? `${activeSet.title} - Research` : baseTitle.current;
+  }, [activeSet?.title]);
+
+  useEffect(() => {
     if (route.view === 'set' && !activeSet) navigate('/papers');
   }, [route, activeSet]);
+
+  const activePdfKey = activeSet
+    ? `${activeSet.id}\n${paperFrontMatter(activeSet.markdown).pmcid ?? ''}`
+    : '';
 
   useEffect(() => {
     if (!activeSet) return;
     const setId = activeSet.id;
-    const pmcid = paperFrontMatter(activeSet.markdown).pmcid;
+    const pmcid = paperFrontMatter(activeSet.markdown).pmcid ?? '';
     const token = ++pdfToken.current;
     const controller = new AbortController();
-    setPdfSession({ id: setId, status: 'loading', bytes: null });
+    const keepExisting = (fallback: 'missing' | 'error') => {
+      setPdfSession((prev) => (prev.id === setId && prev.bytes ? prev : { id: setId, status: fallback, bytes: null }));
+    };
     void (async () => {
       const local = await getPdf(setId);
       if (pdfToken.current !== token) return;
@@ -463,28 +522,31 @@ export default function App() {
         return;
       }
       if (!pmcid) {
-        setPdfSession({ id: setId, status: 'missing', bytes: null });
+        keepExisting('missing');
         return;
       }
-      setPdfSession({ id: setId, status: 'checking', bytes: null });
+      setPdfSession((prev) => (prev.id === setId && prev.bytes ? prev : { id: setId, status: 'checking', bytes: null }));
       try {
         const { fetchOpenAccessPdf } = await import('./lib/europepmc');
         const remote = await fetchOpenAccessPdf(pmcid, controller.signal);
         if (pdfToken.current !== token) return;
         if (!remote) {
-          setPdfSession({ id: setId, status: 'missing', bytes: null });
+          keepExisting('missing');
           return;
         }
         await storePdf(setId, remote);
         if (pdfToken.current !== token) return;
         setPdfSession({ id: setId, status: 'ready', bytes: remote });
-      } catch {
+      } catch (error) {
         if (pdfToken.current !== token) return;
-        setPdfSession({ id: setId, status: 'missing', bytes: null });
+        if ((error as Error)?.name === 'AbortError') return;
+        keepExisting('error');
       }
     })();
     return () => controller.abort();
-  }, [activeSet?.id]);
+    // pmcid is part of activePdfKey. pdfNonce retries a failed download.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePdfKey, pdfNonce]);
 
   const attachPdf = async (file: File) => {
     if (!activeSet) return;
@@ -543,8 +605,8 @@ export default function App() {
       <main className="app-main">
         {libraryWarning && (
           <div className="notice notice-persist" role="alert">
-            <span>{LIBRARY_SAVE_WARNING}</span>
-            <button type="button" className="link-btn" onClick={() => setLibraryWarning(false)} aria-label="Dismiss library save warning">
+            <span>{libraryWarning}</span>
+            <button type="button" className="link-btn" onClick={() => setLibraryWarning(null)} aria-label="Dismiss library warning">
               Dismiss
             </button>
           </div>
@@ -583,6 +645,7 @@ export default function App() {
             pdfBytes={pdfBytes}
             pdfStatus={pdfStatus}
             onAttachPdf={(file) => void attachPdf(file)}
+            onRetryPdf={() => setPdfNonce((n) => n + 1)}
           />
         ) : (
           <ReviewView

@@ -26,6 +26,8 @@ import { ClozeView } from './ClozeView';
 import { MatchView } from './MatchView';
 import { ClaimsView, DataView, FindView, SkimView } from './PaperViews';
 import { PaperReader } from './PaperReader';
+import { NewTabLink } from './Inline';
+import type { PdfLoadStatus } from './ArticlePane';
 
 interface SetShellProps {
   set: StudySet;
@@ -46,8 +48,9 @@ interface SetShellProps {
   /** Re-fetch a paper from its identifier; returns what changed, for the notice. */
   onRefresh?: (set: StudySet) => Promise<string>;
   pdfBytes?: ArrayBuffer | null;
-  pdfStatus?: 'loading' | 'checking' | 'ready' | 'missing';
+  pdfStatus?: PdfLoadStatus;
   onAttachPdf?: (file: File) => void;
+  onRetryPdf?: () => void;
 }
 
 const STUDY_TABS: { mode: Mode; label: string; icon: typeof BookOpen }[] = [
@@ -96,6 +99,7 @@ export function SetShell(props: SetShellProps) {
         pdfBytes={props.pdfBytes ?? null}
         pdfStatus={props.pdfStatus ?? 'missing'}
         onAttachPdf={props.onAttachPdf ?? (() => {})}
+        onRetryPdf={props.onRetryPdf}
       />
     );
   }
@@ -161,29 +165,19 @@ export function SetShell(props: SetShellProps) {
           <div className="stat-chips">
             {subtitle && <span className="paper-subtitle">{subtitle}</span>}
             {doi && (
-              <a className="meta-chip meta-chip-link" href={`https://doi.org/${doi}`} target="_blank" rel="noreferrer noopener">
+              <NewTabLink className="meta-chip meta-chip-link" href={`https://doi.org/${doi}`}>
                 doi.org/{doi} <ExternalLink size={12} aria-hidden />
-              </a>
+              </NewTabLink>
             )}
             {front.pmid && (
-              <a
-                className="meta-chip meta-chip-link"
-                href={`https://pubmed.ncbi.nlm.nih.gov/${front.pmid}/`}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
+              <NewTabLink className="meta-chip meta-chip-link" href={`https://pubmed.ncbi.nlm.nih.gov/${front.pmid}/`}>
                 PubMed <ExternalLink size={12} aria-hidden />
-              </a>
+              </NewTabLink>
             )}
             {front.pmcid && (
-              <a
-                className="meta-chip meta-chip-link"
-                href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${front.pmcid}/`}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
+              <NewTabLink className="meta-chip meta-chip-link" href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${front.pmcid}/`}>
                 {front.pmcid} <ExternalLink size={12} aria-hidden />
-              </a>
+              </NewTabLink>
             )}
             <span className="meta-chip">{material.stats.readingMinutes} min read</span>
           </div>

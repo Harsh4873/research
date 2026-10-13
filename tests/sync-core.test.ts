@@ -8,6 +8,7 @@ import {
   classifySignInError,
   describeAuthError,
   describeSyncError,
+  describeOversizedSets,
   emptyRemoteIndex,
   planPush,
   progressStamp,
@@ -180,6 +181,15 @@ describe('planPush', () => {
     expect(plan.tombstones).toHaveLength(0);
     expect(plan.sets).toHaveLength(0);
     expect(plan.oversized).toEqual(['big']);
+  });
+
+  it('names each paper the size cap left on this device', () => {
+    expect(describeOversizedSets(['Alpha study'])).toContain('Alpha study');
+    expect(describeOversizedSets(['Alpha study'])).not.toContain('One set');
+    const many = describeOversizedSets(['Alpha study', 'Beta study']);
+    expect(many).toContain('2 papers');
+    expect(many).toContain('Alpha study');
+    expect(many).toContain('Beta study');
   });
 
   it('does not push a tombstone over a newer remote edit', () => {

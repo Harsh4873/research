@@ -17,7 +17,8 @@ import type { Mode, StudyMaterial, StudySet } from '../model';
 import { paperFrontMatter, paperSubtitle } from '../lib/paper-set';
 import { NotesView } from './NotesView';
 import { ClaimsView, DataView, FindView, SkimView } from './PaperViews';
-import { ArticlePane } from './ArticlePane';
+import { ArticlePane, type PdfLoadStatus } from './ArticlePane';
+import { NewTabLink } from './Inline';
 import { PdfPane, type LocateRequest } from './PdfPane';
 
 const TABS: { mode: Mode; label: string; icon: typeof BookOpen }[] = [
@@ -43,6 +44,7 @@ export function PaperReader({
   pdfBytes,
   pdfStatus,
   onAttachPdf,
+  onRetryPdf,
 }: {
   set: StudySet;
   material: StudyMaterial;
@@ -56,15 +58,18 @@ export function PaperReader({
   onExport: () => void;
   onRefresh?: (set: StudySet) => Promise<string>;
   pdfBytes: ArrayBuffer | null;
-  pdfStatus: 'loading' | 'checking' | 'ready' | 'missing';
+  pdfStatus: PdfLoadStatus;
   onAttachPdf: (file: File) => void;
+  onRetryPdf?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(set.markdown);
+  const [editorBase, setEditorBase] = useState(set.markdown);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
   const [locate, setLocate] = useState<LocateRequest | null>(null);
   const [pane, setPane] = useState<'doc' | 'tools'>('doc');
+  const [format, setFormat] = useState<'text' | 'pdf'>('text');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const front = paperFrontMatter(set.markdown);
@@ -80,11 +85,29 @@ export function PaperReader({
     setPane('doc');
   };
 
-  const showPdf = pdfStatus === 'ready' && pdfBytes;
+  const chooseFormat = (next: 'text' | 'pdf') => {
+    setFormat(next);
+  };
+
+  const showPdf = format === 'pdf' && pdfStatus === 'ready' && pdfBytes;
+  const editorStale = editing && set.markdown !== editorBase;
 
   return (
     <div className="paper-reader" data-pane={pane}>
       <section className="reader-doc" aria-label="Paper">
+        <div className="reader-doc-bar">
+          <button type="button" className="btn btn-ghost btn-sm reader-doc-back" onClick={onBack}>
+            <ArrowLeft size={16} aria-hidden /> {backLabel}
+          </button>
+          <div className="reader-format" role="group" aria-label="Paper format">
+            <button type="button" className={format === 'text' ? 'reader-switch-on' : ''} aria-pressed={format === 'text'} onClick={() => chooseFormat('text')}>
+              Text
+            </button>
+            <button type="button" className={format === 'pdf' ? 'reader-switch-on' : ''} aria-pressed={format === 'pdf'} onClick={() => chooseFormat('pdf')}>
+              PDF
+            </button>
+          </div>
+        </div>
         <div className="reader-switch" role="group" aria-label="Show">
           <button type="button" className={pane === 'doc' ? 'reader-switch-on' : ''} aria-pressed={pane === 'doc'} onClick={() => setPane('doc')}>
             Paper
@@ -93,12 +116,39 @@ export function PaperReader({
             Tools
           </button>
         </div>
-        {pdfStatus === 'loading' ? (
-          <p className="doc-status">Opening the paper…</p>
-        ) : showPdf ? (
+        {showPdf ? (
           <PdfPane bytes={pdfBytes} locate={locate} />
+        ) : format === 'pdf' ? (
+          <div className="doc-status">
+            <p>
+              {pdfStatus === 'error'
+                ? 'The PDF could not be downloaded.'
+                : pdfStatus === 'missing'
+                  ? 'No PDF on this device.'
+                  : 'Opening the PDF…'}
+            </p>
+            <p>
+              <button type="button" className="link-btn" onClick={() => chooseFormat('text')}>
+                Read the text
+              </button>
+              {pdfStatus === 'error' && onRetryPdf ? (
+                <>
+                  {' '}
+                  <button type="button" className="link-btn" onClick={onRetryPdf}>
+                    Try again
+                  </button>
+                </>
+              ) : null}
+            </p>
+          </div>
         ) : (
-          <ArticlePane doc={material.doc} locate={locate} status={pdfStatus} onFile={onAttachPdf} />
+          <ArticlePane
+            doc={material.doc}
+            locate={locate}
+            status={pdfStatus}
+            onFile={onAttachPdf}
+            onRetry={onRetryPdf}
+          />
         )}
       </section>
 
@@ -124,7 +174,10 @@ export function PaperReader({
                 title="Edit source markdown"
                 aria-label="Edit source markdown"
                 onClick={() => {
-                  setDraft(set.markdown);
+                  if (!editing) {
+                    setDraft(set.markdown);
+                    setEditorBase(set.markdown);
+                  }
                   setEditing((value) => !value);
                 }}
               >
@@ -161,19 +214,19 @@ export function PaperReader({
           <div className="reader-meta">
             {subtitle && <span>{subtitle}</span>}
             {front.doi && (
-              <a href={`https://doi.org/${front.doi}`} target="_blank" rel="noreferrer noopener">
+              <NewTabLink href={`https://doi.org/${front.doi}`}>
                 DOI <ExternalLink size={11} aria-hidden />
-              </a>
+              </NewTabLink>
             )}
             {front.pmid && (
-              <a href={`https://pubmed.ncbi.nlm.nih.gov/${front.pmid}/`} target="_blank" rel="noreferrer noopener">
+              <NewTabLink href={`https://pubmed.ncbi.nlm.nih.gov/${front.pmid}/`}>
                 PubMed <ExternalLink size={11} aria-hidden />
-              </a>
+              </NewTabLink>
             )}
             {front.pmcid && (
-              <a href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${front.pmcid}/`} target="_blank" rel="noreferrer noopener">
+              <NewTabLink href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${front.pmcid}/`}>
                 {front.pmcid} <ExternalLink size={11} aria-hidden />
-              </a>
+              </NewTabLink>
             )}
           </div>
           <input
@@ -200,13 +253,30 @@ export function PaperReader({
 
         {editing && (
           <div className="source-editor">
+            {editorStale && (
+              <p id="editor-stale" className="editor-stale" role="status">
+                The saved paper changed while this editor was open. Reload the editor before saving.
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => {
+                    setDraft(set.markdown);
+                    setEditorBase(set.markdown);
+                  }}
+                >
+                  Reload editor
+                </button>
+              </p>
+            )}
             <textarea className="textarea" rows={10} value={draft} onChange={(event) => setDraft(event.target.value)} spellCheck={false} />
             <div className="paste-form-actions">
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
-                disabled={!draft.trim()}
+                disabled={!draft.trim() || editorStale}
+                aria-describedby={editorStale ? 'editor-stale' : undefined}
                 onClick={() => {
+                  if (set.markdown !== editorBase) return;
                   onSaveMarkdown(draft);
                   setEditing(false);
                 }}

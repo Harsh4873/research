@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -48,7 +48,7 @@ interface ReviewViewProps {
   data: AppData;
   materialFor: (set: StudySet) => StudyMaterial;
   onLookup: (query: string, onStatus: ImportStatus) => Promise<PaperDraft>;
-  onLookupMany: (text: string, onStatus: ImportStatus) => Promise<BulkOutcome>;
+  onLookupMany: (text: string, onStatus: ImportStatus, signal?: AbortSignal) => Promise<BulkOutcome>;
   onImportPdf: (file: File, onStatus: ImportStatus) => Promise<PaperDraft>;
   onReadReferenceFile: (file: File) => Promise<string>;
   onSave: (draft: PaperDraft) => void;
@@ -78,8 +78,12 @@ export function ReviewView(props: ReviewViewProps) {
   const [filter, setFilter] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [dragOver, setDragOver] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copyNote, setCopyNote] = useState<'copied' | 'failed' | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const bulkCancelRef = useRef<AbortController | null>(null);
+  const [bulkCancel, setBulkCancel] = useState<AbortController | null>(null);
+
+  useEffect(() => () => bulkCancelRef.current?.abort(), []);
 
   const papers = data.sets.filter((set) => isPaperSet(set.id));
   const busy = phase.kind === 'working';
@@ -88,7 +92,7 @@ export function ReviewView(props: ReviewViewProps) {
 
   const run = async (task: (onStatus: ImportStatus) => Promise<Phase>) => {
     setPhase({ kind: 'working', status: 'Starting…' });
-    setCopied(false);
+    setCopyNote(null);
     try {
       setPhase(
         await task((status, extras) => setPhase({ kind: 'working', status, sections: extras?.sections })),
@@ -105,8 +109,19 @@ export function ReviewView(props: ReviewViewProps) {
   const runOne = (query: string) =>
     run(async (onStatus) => ({ kind: 'ready', draft: await props.onLookup(query, onStatus) }));
 
-  const runMany = (text: string) =>
-    run(async (onStatus) => ({ kind: 'bulk', outcome: await props.onLookupMany(text, onStatus) }));
+  const runMany = (text: string) => {
+    const controller = new AbortController();
+    bulkCancelRef.current = controller;
+    setBulkCancel(controller);
+    return run(async (onStatus) => {
+      try {
+        return { kind: 'bulk' as const, outcome: await props.onLookupMany(text, onStatus, controller.signal) };
+      } finally {
+        if (bulkCancelRef.current === controller) bulkCancelRef.current = null;
+        setBulkCancel((current) => (current === controller ? null : current));
+      }
+    });
+  };
 
   /** One identifier opens a preview; a list is fetched in bulk. */
   const importText = (text: string) => {
@@ -270,8 +285,14 @@ export function ReviewView(props: ReviewViewProps) {
 
         {phase.kind === 'working' && (
           <div className="review-working fade-in">
-            <div className="review-status" role="status">
-              <Loader2 size={16} aria-hidden className="spin" /> {phase.status}
+            <div className="review-status">
+              <Loader2 size={16} aria-hidden className="spin" />
+              <span className="review-status-text" role="status">{phase.status}</span>
+              {bulkCancel && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => bulkCancel.abort()}>
+                  Cancel import
+                </button>
+              )}
             </div>
             {phase.sections && phase.sections.length > 0 && <LiveSkimList sections={phase.sections} />}
           </div>
@@ -321,7 +342,7 @@ export function ReviewView(props: ReviewViewProps) {
                 <p className="review-result-meta">
                   {phase.outcome.drafts.filter((d) => d.fullText).length} with full text ·{' '}
                   {phase.outcome.drafts.filter((d) => !d.fullText).length} abstract only
-                  {phase.outcome.failures.length > 0 ? ` · ${phase.outcome.failures.length} not found` : ''}
+                  {phase.outcome.failures.length > 0 ? ` · ${phase.outcome.failures.length} failed` : ''}
                 </p>
               </div>
             </div>
@@ -425,16 +446,15 @@ export function ReviewView(props: ReviewViewProps) {
               </button>
               <button
                 type="button"
-                className={`btn btn-sm ${copied ? 'btn-success' : ''}`}
+                className={`btn btn-sm ${copyNote === 'copied' ? 'btn-success' : ''}`}
                 onClick={async () => {
-                  if (await copyText(draft.markdown)) {
-                    setCopied(true);
-                    window.setTimeout(() => setCopied(false), 1800);
-                  }
+                  const ok = await copyText(draft.markdown);
+                  setCopyNote(ok ? 'copied' : 'failed');
+                  window.setTimeout(() => setCopyNote(null), 2200);
                 }}
               >
-                {copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
-                {copied ? 'Copied' : 'Copy markdown'}
+                {copyNote === 'copied' ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
+                {copyNote === 'copied' ? 'Copied' : copyNote === 'failed' ? 'Could not copy' : 'Copy markdown'}
               </button>
               <button type="button" className="btn btn-sm" onClick={downloadMarkdown}>
                 <FileDown size={15} aria-hidden /> Download .md

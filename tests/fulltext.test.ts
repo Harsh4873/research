@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchAnyFullTextXml, hasArticleBody, lookupPaper, openAccessPdfUrls } from '../src/lib/europepmc';
+import { ArchiveBusyError, fetchAnyFullTextXml, fetchOpenAccessPdf, fullTextRetry, hasArticleBody, lookupPaper, openAccessPdfUrls } from '../src/lib/europepmc';
 
 const BODY = `<article><front><article-meta>
   <article-id pub-id-type="pmcid">PMC900001</article-id>
@@ -34,7 +34,20 @@ function routeFetch(routes: Record<string, { status?: number; body?: string; con
   });
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  fullTextRetry.pauseMs = 400;
+  vi.unstubAllGlobals();
+});
+
+describe('fetchOpenAccessPdf', () => {
+  it('throws when the download fails and returns null when no file is there', async () => {
+    vi.stubGlobal('fetch', async () => ({ ok: false, status: 503, arrayBuffer: async () => new ArrayBuffer(0) }) as Response);
+    await expect(fetchOpenAccessPdf('PMC1')).rejects.toThrow(/could not be downloaded/i);
+
+    vi.stubGlobal('fetch', async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) }) as Response);
+    expect(await fetchOpenAccessPdf('PMC1')).toBeNull();
+  });
+});
 
 describe('hasArticleBody', () => {
   it('accepts a body with real content', () => {
@@ -86,6 +99,41 @@ describe('fetchAnyFullTextXml', () => {
   it('returns nothing when the article is in neither archive', async () => {
     routeFetch({});
     expect(await fetchAnyFullTextXml('PMC900001')).toBeNull();
+  });
+
+  it('retries a transient failure and then reads the article', async () => {
+    fullTextRetry.pauseMs = 0;
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls += 1;
+      if (calls < 2) return { ok: false, status: 503, text: async () => '' } as Response;
+      return { ok: true, status: 200, text: async () => BODY } as Response;
+    });
+    const source = await fetchAnyFullTextXml('PMC900001');
+    expect(source?.from).toBe('europepmc');
+    expect(calls).toBe(2);
+  });
+
+  it('does not treat a rate limit as a missing article', async () => {
+    fullTextRetry.pauseMs = 0;
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls += 1;
+      return { ok: false, status: 429, text: async () => '' } as Response;
+    });
+    await expect(fetchAnyFullTextXml('PMC900001')).rejects.toBeInstanceOf(ArchiveBusyError);
+    expect(calls).toBe(fullTextRetry.attempts * 2);
+  });
+
+  it('reports a dropped connection instead of a rate limit', async () => {
+    fullTextRetry.pauseMs = 0;
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('network down');
+    });
+    const error = await fetchAnyFullTextXml('PMC900001').catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ArchiveBusyError);
+    expect((error as Error).message).toMatch(/could not be reached/i);
+    expect((error as Error).message).not.toMatch(/429/);
   });
 
   it('accepts a PMC id written either way', async () => {
@@ -144,6 +192,56 @@ describe('lookupPaper reaches author manuscripts', () => {
     const result = await lookupPaper({ kind: 'doi', value: '10.1016/S1473-3099(09)70282-8' });
     expect(result.fullText).toBe(false);
     expect(result.markdown).toContain('A short abstract.');
+  });
+
+  it('reports an archive failure instead of saving the abstract', async () => {
+    fullTextRetry.pauseMs = 0;
+    routeFetch({
+      '/search?': { body: JSON.stringify(record) },
+      fullTextXML: { status: 429 },
+      'efetch.fcgi?db=pmc': { status: 503 },
+    });
+    const error = await lookupPaper({ kind: 'pmcid', value: 'PMC900001' }).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ArchiveBusyError);
+    expect((error as Error).message).toMatch(/429/);
+  });
+
+  it('does not save an abstract when the abstract request is rate limited', async () => {
+    fullTextRetry.pauseMs = 0;
+    routeFetch({
+      '/search?': {
+        body: JSON.stringify({
+          resultList: { result: [{ pmid: '19926035', title: 'An author manuscript', pubYear: '2009' }] },
+        }),
+      },
+      'efetch.fcgi?db=pubmed': { status: 429 },
+    });
+    await expect(lookupPaper({ kind: 'pmid', value: '19926035' })).rejects.toBeInstanceOf(ArchiveBusyError);
+  });
+
+  it('stops a cancelled lookup instead of returning an abstract', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('rettype=abstract')) {
+        controller.abort();
+        const error = new Error('Aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+      if (url.includes('/search?')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ resultList: { result: [{ pmid: '19926035', title: 'An author manuscript' }] } }),
+          text: async () => '',
+        } as Response;
+      }
+      return { ok: false, status: 404, text: async () => '', json: async () => null } as Response;
+    });
+    await expect(lookupPaper({ kind: 'pmid', value: '19926035' }, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
   });
 
   it('keeps a body that has no titled sections instead of dropping to the abstract', async () => {

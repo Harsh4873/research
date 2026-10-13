@@ -104,14 +104,28 @@ function sanitize(raw: unknown): AppData {
   return data;
 }
 
-export function loadData(storage: StorageLike = defaultStorage()): AppData {
+function readParsed(key: string, storage: StorageLike): { data: AppData; unreadable: boolean } {
+  let raw: string | null;
   try {
-    const raw = storage.getItem(KEY);
-    if (!raw) return defaultData();
-    return sanitize(JSON.parse(raw));
+    raw = storage.getItem(key);
   } catch {
-    return defaultData();
+    return { data: defaultData(), unreadable: false };
   }
+  if (!raw) return { data: defaultData(), unreadable: false };
+  try {
+    return { data: sanitize(JSON.parse(raw)), unreadable: false };
+  } catch {
+    return { data: defaultData(), unreadable: true };
+  }
+}
+
+/** True when a stored library exists but its JSON cannot be parsed. The key is left as it is. */
+export function libraryUnreadable(uid: string | null, storage: StorageLike = defaultStorage()): boolean {
+  return readParsed(uid ? accountDataKey(uid) : KEY, storage).unreadable;
+}
+
+export function loadData(storage: StorageLike = defaultStorage()): AppData {
+  return readParsed(KEY, storage).data;
 }
 
 export function saveData(data: AppData, storage: StorageLike = defaultStorage()): boolean {
@@ -161,13 +175,7 @@ export function loadAccountData(
   uid: string,
   storage: StorageLike = defaultStorage(),
 ): AppData {
-  try {
-    const raw = storage.getItem(accountDataKey(uid));
-    if (!raw) return defaultData();
-    return sanitize(JSON.parse(raw));
-  } catch {
-    return defaultData();
-  }
+  return readParsed(accountDataKey(uid), storage).data;
 }
 
 export function saveAccountData(
@@ -198,12 +206,15 @@ export function loadOrAdoptOwnerVaultData(
 ): AppData {
   if (hasAccountData(vaultId, storage)) return loadAccountData(vaultId, storage);
 
+  // An unreadable cache must not be rewritten, and must not be copied into the vault as an empty library.
   if (activeAccountId === authenticatedLegacyUid) {
-    saveAccountData(vaultId, activeData, storage);
+    if (!libraryUnreadable(authenticatedLegacyUid, storage)) saveAccountData(vaultId, activeData, storage);
   } else if (hasAccountData(authenticatedLegacyUid, storage)) {
-    saveAccountData(vaultId, loadAccountData(authenticatedLegacyUid, storage), storage);
+    if (!libraryUnreadable(authenticatedLegacyUid, storage)) {
+      saveAccountData(vaultId, loadAccountData(authenticatedLegacyUid, storage), storage);
+    }
   } else if (activeAccountId === null) {
-    saveAccountData(vaultId, activeData, storage);
+    if (!libraryUnreadable(null, storage)) saveAccountData(vaultId, activeData, storage);
   }
   return loadAccountData(vaultId, storage);
 }

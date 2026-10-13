@@ -1,6 +1,7 @@
 import { europePmcQuery, normalizePmcid, type PaperId } from './paper-id';
 import { buildFrontMatter, citationLine, jatsToMarkdown, mineAbbreviations, type PaperConversion, type PaperMeta } from './jats';
 import { htmlToMarkdown, structuredAbstractParts } from './html-text';
+import { delay } from './delay';
 
 const EPMC = 'https://www.ebi.ac.uk/europepmc/webservices/rest';
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
@@ -33,17 +34,83 @@ export class PaperLookupError extends Error {
   }
 }
 
+/** 429 and 5xx are retried. A pause of 0 is for tests. */
+export const fullTextRetry = { attempts: 3, pauseMs: 400 };
+
+/**
+ * The archive was busy or unreachable. This is not "the article has no full text".
+ * Callers must not save an abstract in its place.
+ */
+export class ArchiveBusyError extends PaperLookupError {
+  readonly status: number;
+  constructor(status: number) {
+    const detail = status > 0 ? `The archive replied ${status}.` : 'The archive could not be reached.';
+    super(detail, 'The full text was not saved in its place. Try again in a moment.');
+    this.name = 'ArchiveBusyError';
+    this.status = status;
+  }
+}
+
+function isAbort(error: unknown): boolean {
+  return (error as Error)?.name === 'AbortError';
+}
+
+async function fetchResponse(url: string, signal: AbortSignal | undefined, headers?: HeadersInit): Promise<Response> {
+  try {
+    return await fetch(url, { signal, headers });
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    throw new ArchiveBusyError(0);
+  }
+}
+
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
-  const response = await fetch(url, { signal, headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new PaperLookupError(`The lookup service replied ${response.status}.`);
-  return response.json();
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < fullTextRetry.attempts; attempt += 1) {
+    if (attempt > 0) await delay(fullTextRetry.pauseMs * attempt, signal);
+    let response: Response;
+    try {
+      response = await fetchResponse(url, signal, { Accept: 'application/json' });
+    } catch (error) {
+      if (isAbort(error)) throw error;
+      if (error instanceof ArchiveBusyError && error.status > 0) lastStatus = error.status;
+      continue;
+    }
+    if (response.status === 429 || response.status >= 500) {
+      lastStatus = response.status;
+      continue;
+    }
+    if (!response.ok) throw new PaperLookupError(`The lookup service replied ${response.status}.`);
+    try {
+      return await response.json();
+    } catch (error) {
+      if (isAbort(error)) throw error;
+      // A 200 that is not JSON is a bad reply, not a busy archive.
+      throw new PaperLookupError('The lookup service returned an unreadable reply.');
+    }
+  }
+  throw new ArchiveBusyError(lastStatus);
 }
 
 async function getText(url: string, signal?: AbortSignal): Promise<string | null> {
-  const response = await fetch(url, { signal });
-  if (response.status === 404) return null;
-  if (!response.ok) return null;
-  return response.text();
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < fullTextRetry.attempts; attempt += 1) {
+    if (attempt > 0) await delay(fullTextRetry.pauseMs * attempt, signal);
+    try {
+      const response = await fetchResponse(url, signal);
+      if (response.status === 404) return null;
+      if (response.status === 429 || response.status >= 500) {
+        lastStatus = response.status;
+        continue;
+      }
+      if (!response.ok) return null;
+      return response.text();
+    } catch (error) {
+      if (isAbort(error)) throw error;
+      lastStatus = 0;
+    }
+  }
+  throw new ArchiveBusyError(lastStatus);
 }
 
 /** Look up article metadata in Europe PMC. */
@@ -56,9 +123,10 @@ export async function searchEuropePmc(id: PaperId, signal?: AbortSignal): Promis
 /** NCBI esummary, used when Europe PMC has no record for a PMID. */
 async function ncbiSummary(pmid: string, signal?: AbortSignal): Promise<EpmcRecord | null> {
   const url = `${EUTILS}/esummary.fcgi?db=pubmed&id=${encodeURIComponent(pmid)}&retmode=json`;
-  const payload = (await getJson(url, signal).catch(() => null)) as
-    | { result?: Record<string, unknown> }
-    | null;
+  const payload = (await getJson(url, signal).catch((error) => {
+    if (isAbort(error) || error instanceof ArchiveBusyError) throw error;
+    return null;
+  })) as { result?: Record<string, unknown> } | null;
   const entry = payload?.result?.[pmid] as
     | { title?: string; fulljournalname?: string; source?: string; pubdate?: string; authors?: Array<{ name?: string }>; elocationid?: string; articleids?: Array<{ idtype?: string; value?: string }> }
     | undefined;
@@ -79,7 +147,13 @@ async function ncbiSummary(pmid: string, signal?: AbortSignal): Promise<EpmcReco
 /** Fetch NCBI's abstract text for records Europe PMC only knows by title. */
 async function ncbiAbstract(pmid: string, signal?: AbortSignal): Promise<string | undefined> {
   const url = `${EUTILS}/efetch.fcgi?db=pubmed&id=${encodeURIComponent(pmid)}&rettype=abstract&retmode=text`;
-  const text = await getText(url, signal).catch(() => null);
+  let text: string | null;
+  try {
+    text = await getText(url, signal);
+  } catch (error) {
+    if (isAbort(error) || error instanceof ArchiveBusyError) throw error;
+    return undefined;
+  }
   if (!text) return undefined;
   // The plain-text record puts the abstract between the author list and the
   // trailing metadata lines; keep the longest paragraph as a safe heuristic.
@@ -136,14 +210,33 @@ function looksLikePdf(buf: ArrayBuffer): boolean {
   return headBytes(buf, 5).startsWith('%PDF');
 }
 
-/** Fetch a PDF only when the response is actually a PDF, not a Cloudflare HTML wall. */
-async function fetchPdfBuffer(url: string, signal?: AbortSignal): Promise<ArrayBuffer | null> {
+/** A download failed (network, 429, or 5xx). A missing or non-PDF response is not this error. */
+export class PdfDownloadError extends Error {
+  constructor() {
+    super('The PDF could not be downloaded.');
+    this.name = 'PdfDownloadError';
+  }
+}
+
+/**
+ * Fetch a PDF only when the response is actually a PDF, not an HTML wall.
+ * `strict` throws on network errors, 429, and 5xx so the reader can tell
+ * "download failed" from "no file". Lookup keeps the lenient path.
+ */
+async function fetchPdfBuffer(url: string, signal?: AbortSignal, strict = false): Promise<ArrayBuffer | null> {
   try {
     const response = await fetch(url, { signal, redirect: 'follow' });
-    if (!response.ok) return null;
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      if (strict && (response.status === 429 || response.status >= 500)) throw new PdfDownloadError();
+      return null;
+    }
     const buf = await response.arrayBuffer();
     return looksLikePdf(buf) ? buf : null;
-  } catch {
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    if (error instanceof PdfDownloadError) throw error;
+    if (strict) throw new PdfDownloadError();
     return null;
   }
 }
@@ -182,14 +275,32 @@ export async function fetchPmcFullTextXml(pmcid: string, signal?: AbortSignal): 
   return xml;
 }
 
-/** The best full text either archive has for this article, or null. */
+async function loadXml(
+  load: () => Promise<string | null>,
+): Promise<{ xml: string | null; busy: boolean; status: number }> {
+  try {
+    return { xml: await load(), busy: false, status: 0 };
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    // Busy, 5xx, and network failures are not "this archive has no article".
+    const status = error instanceof ArchiveBusyError ? error.status : 0;
+    return { xml: null, busy: true, status };
+  }
+}
+
+function busyStatus(parts: Array<{ busy: boolean; status: number }>): number {
+  return parts.find((part) => part.busy && part.status > 0)?.status ?? 0;
+}
+
+/** The best full text either archive has for this article, or null. Throws when an archive was busy. */
 export async function fetchAnyFullTextXml(pmcid: string, signal?: AbortSignal): Promise<FullTextSource | null> {
-  const epmc = await fetchFullTextXml(pmcid, signal).catch(() => null);
-  if (epmc && hasArticleBody(epmc)) return { xml: epmc, from: 'europepmc' };
-  const ncbi = await fetchPmcFullTextXml(pmcid, signal).catch(() => null);
-  if (ncbi && hasArticleBody(ncbi)) return { xml: ncbi, from: 'pmc' };
+  const epmc = await loadXml(() => fetchFullTextXml(pmcid, signal));
+  if (epmc.xml && hasArticleBody(epmc.xml)) return { xml: epmc.xml, from: 'europepmc' };
+  const ncbi = await loadXml(() => fetchPmcFullTextXml(pmcid, signal));
+  if (ncbi.xml && hasArticleBody(ncbi.xml)) return { xml: ncbi.xml, from: 'pmc' };
+  if (epmc.busy || ncbi.busy) throw new ArchiveBusyError(busyStatus([epmc, ncbi]));
   // Neither carried a body; the Europe PMC copy is still the better metadata.
-  if (epmc) return { xml: epmc, from: 'europepmc' };
+  if (epmc.xml) return { xml: epmc.xml, from: 'europepmc' };
   return null;
 }
 
@@ -279,29 +390,39 @@ export async function fetchOpenAccessPdf(pmcid: string, signal?: AbortSignal): P
     `https://europepmc.org/articles/${id}?pdf=render`,
     `https://europepmc.org/backend/ptpmcrender.fcgi?accid=${id}&blobtype=pdf`,
   ];
+  let failed = false;
   for (const url of urls) {
-    const buf = await fetchPdfBuffer(url, signal);
-    if (buf) return buf;
+    try {
+      const buf = await fetchPdfBuffer(url, signal, true);
+      if (buf) return buf;
+    } catch (error) {
+      if (isAbort(error)) throw error;
+      failed = true;
+    }
   }
+  if (failed) throw new PdfDownloadError();
   return null;
 }
 
 /** Resolve an identifier all the way to study markdown. */
 export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<LookupResult> {
   let record: EpmcRecord | null = null;
+  let lookupError: ArchiveBusyError | null = null;
   try {
     record = await searchEuropePmc(id, signal);
   } catch (error) {
-    if ((error as Error)?.name === 'AbortError') throw error;
+    if (isAbort(error)) throw error;
+    if (error instanceof ArchiveBusyError) lookupError = error;
     record = null;
   }
 
   if (!record && id.kind === 'pmid') record = await ncbiSummary(id.value, signal);
 
   if (!record) {
+    if (lookupError) throw lookupError;
     throw new PaperLookupError(
       'No article matched that identifier.',
-      'Check the PMID, PMCID, or DOI — or upload the PDF instead.',
+      'Check the PMID, PMCID, or DOI, or upload the PDF instead.',
     );
   }
 
@@ -315,8 +436,16 @@ export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<Lo
   // exactly the author-manuscript case, where Europe PMC holds no full text
   // but NCBI does, so gating on it was throwing away the papers most likely
   // to be recoverable.
+  let archiveError: ArchiveBusyError | null = null;
   if (pmcid) {
-    const source = await fetchAnyFullTextXml(pmcid, signal).catch(() => null);
+    let source: FullTextSource | null = null;
+    try {
+      source = await fetchAnyFullTextXml(pmcid, signal);
+    } catch (error) {
+      if (isAbort(error)) throw error;
+      if (error instanceof ArchiveBusyError) archiveError = error;
+      else throw error;
+    }
     if (source) {
       const archive = source.from === 'pmc' ? 'PubMed Central' : 'Europe PMC';
       const converted = jatsToMarkdown(source.xml, {
@@ -378,13 +507,16 @@ export async function lookupPaper(id: PaperId, signal?: AbortSignal): Promise<Lo
         openAccessNote: 'Full text from the open-access publisher PDF.',
         pdf: buf,
       };
-    } catch {
+    } catch (error) {
+      if (isAbort(error)) throw error;
       /* try the next URL */
     }
   }
 
+  if (archiveError) throw archiveError;
+
   let abstractText = record.abstractText;
-  if (!abstractText && meta.pmid) abstractText = await ncbiAbstract(meta.pmid, signal).catch(() => undefined);
+  if (!abstractText && meta.pmid) abstractText = await ncbiAbstract(meta.pmid, signal);
 
   const conversion = abstractOnlyMarkdown(
     meta,

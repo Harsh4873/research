@@ -438,7 +438,9 @@ button {
 .set-card-main:focus-visible,
 .brand:focus-visible,
 .reader-tab:focus-visible,
+.reader-format button:focus-visible,
 .reader-switch button:focus-visible,
+.sync-pop:focus-visible,
 .header-tab:focus-visible,
 .link-btn:focus-visible,
 .cite-jump:focus-visible,
@@ -783,6 +785,12 @@ button {
 .review-status {
   background: var(--accent-soft);
   color: var(--accent);
+  flex-wrap: wrap;
+}
+
+.review-status-text {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 
 .review-error {
@@ -1725,6 +1733,7 @@ textarea.review-input {
   font-size: 13px;
   font-weight: 600;
   margin: 0 0 10px;
+  overflow-wrap: anywhere;
 }
 
 .sync-pop-actions {
@@ -3215,7 +3224,7 @@ textarea.review-input {
   border-radius: var(--radius-sm);
   border: 1px dashed var(--border-strong);
   background: var(--panel-2);
-  color: var(--text-dim);
+  color: var(--text-soft);
   font-size: 13.5px;
 }
 .figure-fallback a,
@@ -3239,11 +3248,11 @@ textarea.review-input {
   margin-top: 12px;
   padding: 12px 15px;
   border-radius: var(--radius);
-  border: 1px solid var(--accent-line);
+  border: 1px solid var(--border);
   background: var(--accent-soft);
 }
 .review-collection strong { display: block; font-size: 14px; }
-.review-collection span { display: block; margin-top: 2px; font-size: 13px; color: var(--text-dim); max-width: 62ch; }
+.review-collection span { display: block; margin-top: 2px; font-size: 13px; color: var(--text-soft); max-width: 62ch; }
 
 .refresh-note {
   display: flex;
@@ -3254,7 +3263,7 @@ textarea.review-input {
   margin: 12px 0 0;
   padding: 10px 14px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--accent-line);
+  border: 1px solid var(--border);
   background: var(--accent-soft);
   font-size: 13.5px;
 }
@@ -3323,6 +3332,14 @@ textarea.review-input {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reader-side .set-actions {
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
 }
 
 .reader-title {
@@ -3525,14 +3542,58 @@ textarea.review-input {
   color: var(--text);
 }
 
+.reader-doc-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px 0;
+}
+
+.reader-doc-back {
+  display: none;
+  flex: 0 0 auto;
+}
+
+.reader-format {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.editor-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  font-size: 13.5px;
+}
+
 .reader-switch {
   display: none;
   gap: 6px;
   padding: 8px 10px 0;
 }
 
+.reader-format button,
 .reader-switch button {
-  flex: 1;
+  flex: 1 1 auto;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-soft);
@@ -3544,7 +3605,13 @@ textarea.review-input {
   cursor: pointer;
 }
 
-.reader-switch-on {
+.reader-format button {
+  flex: 0 0 auto;
+  min-width: 72px;
+}
+
+.reader-format button.reader-switch-on,
+.reader-switch button.reader-switch-on {
   background: var(--accent-soft);
   color: var(--accent-strong);
   border-color: transparent;
@@ -3565,5 +3632,13 @@ textarea.review-input {
 
   .reader-switch {
     display: flex;
+  }
+
+  .reader-doc-back {
+    display: inline-flex;
+  }
+
+  .reader-format button {
+    flex: 1 1 auto;
   }
 }
