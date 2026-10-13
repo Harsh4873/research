@@ -61,7 +61,7 @@ function ArticleBlock({ block }: { block: Block }) {
     }
     case 'table':
       return (
-        <div className="table-scroll">
+        <div className="table-scroll" tabIndex={0} aria-label="Table">
           <table className="doc-table">
             <thead>
               <tr>

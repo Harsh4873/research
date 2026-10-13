@@ -163,6 +163,7 @@ function ReadingToolbar({
                   key={r}
                   type="button"
                   className={`rate-chip ${reader.rate === r ? 'rate-chip-active' : ''}`}
+                  aria-pressed={reader.rate === r}
                   onClick={() => reader.setRate(r)}
                 >
                   {r}×
@@ -318,7 +319,7 @@ function BlockView({
       );
     case 'table':
       return (
-        <div id={anchorId} className={`table-scroll ${speaking ? 'speaking' : ''}`}>
+        <div id={anchorId} className={`table-scroll ${speaking ? 'speaking' : ''}`} tabIndex={0} aria-label="Table">
           <table className="doc-table">
             <thead>
               <tr>

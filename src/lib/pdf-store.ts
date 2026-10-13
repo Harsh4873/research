@@ -35,6 +35,18 @@ export async function putPdf(id: string, bytes: ArrayBuffer): Promise<void> {
   }
 }
 
+export function copyStoredPdf(value: unknown): ArrayBuffer | null {
+  try {
+    if (value instanceof ArrayBuffer) return value.slice(0);
+    if (!ArrayBuffer.isView(value)) return null;
+    const copy = new Uint8Array(value.byteLength);
+    copy.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    return copy.buffer;
+  } catch {
+    return null;
+  }
+}
+
 export async function getPdf(id: string): Promise<ArrayBuffer | null> {
   let db: IDBDatabase;
   try {
@@ -47,8 +59,7 @@ export async function getPdf(id: string): Promise<ArrayBuffer | null> {
       const tx = db.transaction(STORE, 'readonly');
       const request = tx.objectStore(STORE).get(id);
       request.onsuccess = () => {
-        const value = request.result;
-        resolve(value instanceof ArrayBuffer ? value : null);
+        resolve(copyStoredPdf(request.result));
       };
       request.onerror = () => reject(request.error ?? new Error('Could not read the PDF'));
     });

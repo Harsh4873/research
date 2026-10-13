@@ -332,7 +332,11 @@ export function ReviewView(props: ReviewViewProps) {
                   <span className={`bulk-dot ${item.fullText ? 'bulk-dot-full' : 'bulk-dot-partial'}`} aria-hidden />
                   <span className="bulk-title">{item.meta.title}</span>
                   <span className="bulk-meta">
-                    {[item.meta.year, item.meta.pmid ? `PMID ${item.meta.pmid}` : ''].filter(Boolean).join(' · ')}
+                    {[
+                      item.fullText ? 'Full text' : 'Abstract only',
+                      item.meta.year,
+                      item.meta.pmid ? `PMID ${item.meta.pmid}` : '',
+                    ].filter(Boolean).join(' · ')}
                   </span>
                 </li>
               ))}
@@ -340,7 +344,7 @@ export function ReviewView(props: ReviewViewProps) {
                 <li key={`f${index}`} className="bulk-item bulk-item-failed">
                   <span className="bulk-dot bulk-dot-failed" aria-hidden />
                   <span className="bulk-title">{failure.label}</span>
-                  <span className="bulk-meta">{failure.message}</span>
+                  <span className="bulk-meta">Failed · {failure.message}</span>
                 </li>
               ))}
             </ul>

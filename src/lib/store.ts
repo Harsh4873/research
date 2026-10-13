@@ -114,11 +114,12 @@ export function loadData(storage: StorageLike = defaultStorage()): AppData {
   }
 }
 
-export function saveData(data: AppData, storage: StorageLike = defaultStorage()): void {
+export function saveData(data: AppData, storage: StorageLike = defaultStorage()): boolean {
   try {
     storage.setItem(KEY, JSON.stringify(data));
+    return true;
   } catch {
-    /* quota exceeded or storage blocked; keep the in-memory copy */
+    return false;
   }
 }
 
@@ -173,11 +174,12 @@ export function saveAccountData(
   uid: string,
   data: AppData,
   storage: StorageLike = defaultStorage(),
-): void {
+): boolean {
   try {
     storage.setItem(accountDataKey(uid), JSON.stringify(data));
+    return true;
   } catch {
-    /* quota exceeded or storage blocked; keep the in-memory copy */
+    return false;
   }
 }
 

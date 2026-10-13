@@ -52,6 +52,18 @@ describe('persistence round-trip', () => {
     expect(loaded.progress[set.id].cards.card1.seen).toBe(1);
   });
 
+  it('reports when the browser refuses to store the library', () => {
+    const storage = memoryStorage();
+    expect(saveData(defaultData(), storage)).toBe(true);
+    expect(saveAccountData('uid', defaultData(), storage)).toBe(true);
+    storage.setItem = () => {
+      throw new Error('quota');
+    };
+    expect(saveData(defaultData(), storage)).toBe(false);
+    expect(saveAccountData('uid', defaultData(), storage)).toBe(false);
+    expect(loadData(storage).sets).toEqual([]);
+  });
+
   it('survives corrupt storage payloads', () => {
     const storage = memoryStorage();
     storage.setItem('recall.data.v1', '{not json');

@@ -86,10 +86,10 @@ export function PaperReader({
     <div className="paper-reader" data-pane={pane}>
       <section className="reader-doc" aria-label="Paper">
         <div className="reader-switch" role="group" aria-label="Show">
-          <button type="button" className={pane === 'doc' ? 'reader-switch-on' : ''} onClick={() => setPane('doc')}>
+          <button type="button" className={pane === 'doc' ? 'reader-switch-on' : ''} aria-pressed={pane === 'doc'} onClick={() => setPane('doc')}>
             Paper
           </button>
-          <button type="button" className={pane === 'tools' ? 'reader-switch-on' : ''} onClick={() => setPane('tools')}>
+          <button type="button" className={pane === 'tools' ? 'reader-switch-on' : ''} aria-pressed={pane === 'tools'} onClick={() => setPane('tools')}>
             Tools
           </button>
         </div>
@@ -221,10 +221,10 @@ export function PaperReader({
         )}
 
         <div className="reader-switch reader-switch-side" role="group" aria-label="Show">
-          <button type="button" className={pane === 'doc' ? 'reader-switch-on' : ''} onClick={() => setPane('doc')}>
+          <button type="button" className={pane === 'doc' ? 'reader-switch-on' : ''} aria-pressed={pane === 'doc'} onClick={() => setPane('doc')}>
             Paper
           </button>
-          <button type="button" className={pane === 'tools' ? 'reader-switch-on' : ''} onClick={() => setPane('tools')}>
+          <button type="button" className={pane === 'tools' ? 'reader-switch-on' : ''} aria-pressed={pane === 'tools'} onClick={() => setPane('tools')}>
             Tools
           </button>
         </div>
@@ -235,6 +235,7 @@ export function PaperReader({
               key={tab}
               type="button"
               className={`reader-tab ${active === tab ? 'reader-tab-active' : ''}`}
+              aria-pressed={active === tab}
               onClick={() => {
                 onNavigate(tab);
                 setPane('tools');

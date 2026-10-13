@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'recall-shell-';
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 // The previous app at this scope used these cache names; clear them on takeover.
 const LEGACY_PREFIXES = ['sift-shell-'];
 
@@ -23,6 +23,40 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+function hashedAsset(pathname) {
+  if (!pathname.includes('/assets/')) return null;
+  const file = pathname.split('/').pop();
+  if (!file) return null;
+  // Hash is the last segment, so reference-file-abc12345.js does not share a stem with another chunk.
+  const match = file.match(/^(.*)-([A-Za-z0-9_-]{8,})(\.[A-Za-z0-9]+)$/);
+  if (!match || !match[1]) return null;
+  return { stem: match[1], ext: match[3].toLowerCase() };
+}
+
+function remember(request, response) {
+  if (!response || response.status !== 200 || response.type !== 'basic') return Promise.resolve();
+  let copy;
+  try {
+    copy = response.clone();
+  } catch {
+    return Promise.resolve();
+  }
+  const url = new URL(request.url);
+  return caches.open(CACHE_NAME).then(async (cache) => {
+    await cache.put(request, copy);
+    const hashed = hashedAsset(url.pathname);
+    if (!hashed) return;
+    const keys = await cache.keys();
+    await Promise.all(keys.map((key) => {
+      const path = new URL(key.url).pathname;
+      if (path === url.pathname) return undefined;
+      const other = hashedAsset(path);
+      if (!other || other.stem !== hashed.stem || other.ext !== hashed.ext) return undefined;
+      return cache.delete(key);
+    }));
+  }).catch(() => undefined);
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -34,8 +68,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          void caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          event.waitUntil(remember(request, response));
           return response;
         })
         .catch(async () => (await caches.match(request)) ?? caches.match(self.registration.scope)),
@@ -45,10 +78,7 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     caches.match(request).then((cached) => cached ?? fetch(request).then((response) => {
-      if (response.ok && response.type === 'basic') {
-        const copy = response.clone();
-        void caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-      }
+      event.waitUntil(remember(request, response));
       return response;
     })),
   );

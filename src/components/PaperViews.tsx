@@ -41,9 +41,17 @@ function jumpToNotes(setId: string, headingId?: string) {
   }, 120);
 }
 
+/** Scroll a section that is already on this page. Hash URLs are the router. */
+function scrollToId(id: string) {
+  const node = document.getElementById(id);
+  if (!node) return;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  node.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+}
+
 function DocTable({ block }: { block: TableBlock }) {
   return (
-    <div className="table-scroll">
+    <div className="table-scroll" tabIndex={0} aria-label="Table">
       <table className="doc-table">
         <thead>
           <tr>
@@ -134,11 +142,21 @@ export function DataView({
   return (
     <div className="paper-pane fade-in">
       <nav className="pane-jump" aria-label="Jump to">
-        {supplements.length > 0 && <a href="#d-supp">{supplements.length} supplementary</a>}
-        {tables.length > 0 && <a href="#d-tables">{tables.length} tables</a>}
-        {figures.length > 0 && <a href="#d-figures">{figures.length} figures</a>}
-        {equations.length > 0 && <a href="#d-equations">{equations.length} equations</a>}
-        {availability.length > 0 && <a href="#d-availability">availability</a>}
+        {supplements.length > 0 && (
+          <button type="button" onClick={() => scrollToId('d-supp')}>{supplements.length} supplementary</button>
+        )}
+        {tables.length > 0 && (
+          <button type="button" onClick={() => scrollToId('d-tables')}>{tables.length} tables</button>
+        )}
+        {figures.length > 0 && (
+          <button type="button" onClick={() => scrollToId('d-figures')}>{figures.length} figures</button>
+        )}
+        {equations.length > 0 && (
+          <button type="button" onClick={() => scrollToId('d-equations')}>{equations.length} equations</button>
+        )}
+        {availability.length > 0 && (
+          <button type="button" onClick={() => scrollToId('d-availability')}>availability</button>
+        )}
       </nav>
 
       {supplements.length > 0 && (
@@ -361,6 +379,7 @@ export function ClaimsView({
                 key={option.key}
                 type="button"
                 className={`chip ${filter === option.key ? 'chip-active' : ''}`}
+                aria-pressed={filter === option.key}
                 onClick={() => setFilter(option.key)}
               >
                 {option.label} ({count})
@@ -418,7 +437,7 @@ export function FindView({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    if (window.matchMedia('(min-width: 900px)').matches) inputRef.current?.focus();
   }, []);
 
   const hits: SearchHit[] = useMemo(() => (mode === 'text' ? searchPaper(doc, query) : []), [doc, query, mode]);
@@ -455,6 +474,7 @@ export function FindView({
           <button
             type="button"
             className={`chip ${mode === 'text' ? 'chip-active' : ''}`}
+            aria-pressed={mode === 'text'}
             onClick={() => setMode('text')}
           >
             Text
@@ -462,6 +482,7 @@ export function FindView({
           <button
             type="button"
             className={`chip ${mode === 'numbers' ? 'chip-active' : ''}`}
+            aria-pressed={mode === 'numbers'}
             onClick={() => setMode('numbers')}
           >
             <Hash size={13} aria-hidden /> Numbers
@@ -721,9 +742,13 @@ export function SkimReport({
           {sections.length > 3 && (
             <nav className="skim-toc" aria-label="Sections">
               {sections.map((section) => (
-                <a key={section.id || section.title} href={`#skim-${section.id}`}>
+                <button
+                  key={section.id || section.title}
+                  type="button"
+                  onClick={() => scrollToId(`skim-${section.id}`)}
+                >
                   {section.title}
-                </a>
+                </button>
               ))}
             </nav>
           )}

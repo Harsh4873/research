@@ -33,6 +33,10 @@ import { deletePdf, getPdf, putPdf } from './lib/pdf-store';
 const MAX_BULK_LOOKUPS = 120;
 
 const SYNC_FLAG_KEY = 'recall.sync.on';
+const LIBRARY_SAVE_WARNING =
+  'Could not save the library in this browser. It is still open in this tab, but a reload may bring back an older copy.';
+const PDF_SAVE_WARNING =
+  'Could not store the PDF on this device. The paper text is still available.';
 
 function syncFlag(): boolean {
   try {
@@ -80,6 +84,11 @@ export default function App() {
   dataRef.current = data;
   const [route, setRoute] = useState<Route>(parseHash);
   const [notice, setNotice] = useState<string | null>(null);
+  const [libraryWarning, setLibraryWarning] = useState(false);
+  const [pdfWarning, setPdfWarning] = useState(false);
+  const libraryFailKey = useRef<string | null>(null);
+  const pdfInflight = useRef(0);
+  const pdfFailed = useRef(0);
   const [pdfSession, setPdfSession] = useState<{
     id: string;
     status: 'loading' | 'checking' | 'ready' | 'missing';
@@ -89,6 +98,46 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'off' });
   const cloudRef = useRef<CloudEngine | null>(null);
 
+  const noteLibrarySave = (uid: string | null, saved: boolean) => {
+    const key = uid ?? '';
+    if (!saved) {
+      libraryFailKey.current = key;
+      setLibraryWarning(true);
+      return;
+    }
+    // A later save of a different account must not hide a failure to write the previous one.
+    if (libraryFailKey.current !== null && libraryFailKey.current !== key) return;
+    libraryFailKey.current = null;
+    setLibraryWarning(false);
+  };
+
+  const finishPdf = (ok: boolean) => {
+    pdfInflight.current = Math.max(0, pdfInflight.current - 1);
+    if (!ok) {
+      pdfFailed.current += 1;
+      setPdfWarning(true);
+    }
+    if (pdfInflight.current === 0) {
+      const failed = pdfFailed.current > 0;
+      pdfFailed.current = 0;
+      if (!failed) setPdfWarning(false);
+    }
+  };
+
+  const storePdf = async (id: string, bytes: ArrayBuffer): Promise<boolean> => {
+    pdfInflight.current += 1;
+    let ok = false;
+    try {
+      await putPdf(id, bytes.slice(0));
+      ok = true;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      finishPdf(ok);
+    }
+  };
+
   const bootCloud = async (): Promise<CloudEngine> => {
     const { startCloud } = await import('./lib/cloud');
     const engine = startCloud({
@@ -97,8 +146,8 @@ export default function App() {
         const previousUid = activeAccountRef.current;
         if (previousUid === vaultId) return dataRef.current;
 
-        if (previousUid) {
-          saveAccountData(previousUid, dataRef.current);
+        if (previousUid && !saveAccountData(previousUid, dataRef.current)) {
+          noteLibrarySave(previousUid, false);
         }
 
         const next = loadOrAdoptOwnerVaultData(
@@ -157,8 +206,8 @@ export default function App() {
 
   useEffect(() => {
     const uid = activeAccountRef.current;
-    if (uid) saveAccountData(uid, data);
-    else saveData(data);
+    const saved = uid ? saveAccountData(uid, data) : saveData(data);
+    noteLibrarySave(uid, saved);
     cloudRef.current?.push(data);
   }, [data]);
 
@@ -166,6 +215,18 @@ export default function App() {
     const root = document.documentElement;
     if (data.theme === 'auto') delete root.dataset.theme;
     else root.dataset.theme = data.theme;
+
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (!(meta instanceof HTMLMetaElement)) return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const dark = data.theme === 'dark' || (data.theme === 'auto' && media.matches);
+      meta.content = dark ? '#121410' : '#f3efe6';
+    };
+    apply();
+    if (data.theme !== 'auto') return;
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
   }, [data.theme]);
 
   useEffect(() => {
@@ -267,13 +328,7 @@ export default function App() {
       draft.markdown,
       nextDataTimestamp(dataRef.current),
     );
-    if (draft.pdf) {
-      try {
-        await putPdf(created.id, draft.pdf.slice(0));
-      } catch {
-        /* the paper still opens from its text */
-      }
-    }
+    if (draft.pdf) await storePdf(created.id, draft.pdf);
     setData((d) => upsertSet(d, created));
     navigate(`/set/${created.id}/skim`);
   };
@@ -317,7 +372,7 @@ export default function App() {
     if (drafts.length === 0) return;
     setData((d) => drafts.reduce((acc, draft) => {
       const created = createPaperSet(draft.meta.title, draft.markdown, nextDataTimestamp(acc));
-      if (draft.pdf) void putPdf(created.id, draft.pdf.slice(0));
+      if (draft.pdf) void storePdf(created.id, draft.pdf);
       return upsertSet(acc, created);
     }, d));
     setNotice(`Added ${drafts.length} paper${drafts.length === 1 ? '' : 's'}.`);
@@ -420,7 +475,7 @@ export default function App() {
           setPdfSession({ id: setId, status: 'missing', bytes: null });
           return;
         }
-        await putPdf(setId, remote.slice(0)).catch(() => undefined);
+        await storePdf(setId, remote);
         if (pdfToken.current !== token) return;
         setPdfSession({ id: setId, status: 'ready', bytes: remote });
       } catch {
@@ -435,11 +490,7 @@ export default function App() {
     if (!activeSet) return;
     const token = ++pdfToken.current;
     const bytes = await file.arrayBuffer();
-    try {
-      await putPdf(activeSet.id, bytes.slice(0));
-    } catch {
-      /* still show it for this session */
-    }
+    await storePdf(activeSet.id, bytes);
     if (pdfToken.current !== token) return;
     setPdfSession({ id: activeSet.id, status: 'ready', bytes });
   };
@@ -463,6 +514,7 @@ export default function App() {
             <button
               type="button"
               className={`header-tab header-tab-papers ${route.view === 'review' ? 'header-tab-active' : ''}`}
+              aria-current={route.view === 'review' ? 'page' : undefined}
               onClick={() => navigate('/papers')}
             >
               Papers
@@ -489,6 +541,22 @@ export default function App() {
       </header>
 
       <main className="app-main">
+        {libraryWarning && (
+          <div className="notice notice-persist" role="alert">
+            <span>{LIBRARY_SAVE_WARNING}</span>
+            <button type="button" className="link-btn" onClick={() => setLibraryWarning(false)} aria-label="Dismiss library save warning">
+              Dismiss
+            </button>
+          </div>
+        )}
+        {pdfWarning && (
+          <div className="notice notice-persist" role="alert">
+            <span>{PDF_SAVE_WARNING}</span>
+            <button type="button" className="link-btn" onClick={() => setPdfWarning(false)} aria-label="Dismiss PDF save warning">
+              Dismiss
+            </button>
+          </div>
+        )}
         {notice && (
           <div className="notice fade-in" role="status">
             {notice}

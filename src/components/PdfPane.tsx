@@ -148,6 +148,17 @@ export function PdfPane({ bytes, locate }: PdfPaneProps) {
   );
 }
 
+/** How far a page sits outside the scroller, or null when the scroller is not on screen. */
+function pageGap(scroller: HTMLElement, element: HTMLElement): number | null {
+  if (scroller.clientHeight === 0 || scroller.clientWidth === 0) return null;
+  const root = scroller.getBoundingClientRect();
+  const box = element.getBoundingClientRect();
+  if (box.height === 0) return null;
+  const above = root.top - box.bottom;
+  const below = box.top - root.bottom;
+  return Math.max(above, below, 0);
+}
+
 function PdfPage({
   doc,
   pdfjs,
@@ -191,18 +202,28 @@ function PdfPage({
   useEffect(() => {
     const element = wrapRef.current;
     const scroller = root.current;
-    if (!element || !scroller || show) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) setShow(true);
-      },
-      { root: scroller, rootMargin: '700px 0px' },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [root, show, size]);
+    if (!element || !scroller || !size) return;
+    const update = () => {
+      const gap = pageGap(scroller, element);
+      if (gap === null) return;
+      if (gap <= 700) setShow(true);
+      else if (!quote && gap > 1600) setShow(false);
+    };
+    const showNear = new IntersectionObserver(update, { root: scroller, rootMargin: '700px 0px' });
+    const hideFar = new IntersectionObserver(update, { root: scroller, rootMargin: '1600px 0px' });
+    const resize = new ResizeObserver(update);
+    showNear.observe(element);
+    hideFar.observe(element);
+    resize.observe(scroller);
+    return () => {
+      showNear.disconnect();
+      hideFar.disconnect();
+      resize.disconnect();
+    };
+  }, [root, size, quote]);
 
   useEffect(() => {
+    if (!quote) setSpan(null);
     if (!show || !size) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
